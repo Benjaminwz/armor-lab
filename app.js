@@ -65,7 +65,7 @@
   let r3d = null;
   const threeOK = !!window.THREE;
   if (!threeOK) { $('v3d').disabled = true; $('v3d').title = '3D 函式庫未能載入'; }
-  function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); } } return r3d; }
+  function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); r3d.setCut((S.opts.cut || 0) / 100); } } return r3d; }
   r2d.onCrewMove = (i, x, y) => onCrewMove(i, x, y, S.crew[i].z || 0);
   r2d.onCrewDrop = i => onCrewDrop(i);
   window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow() }; // 偵錯用
@@ -195,7 +195,7 @@
     if (v === '3d' && !ensure3D()) v = '2d';
     S.view = v; save();
     $('v2d').setAttribute('aria-pressed', v === '2d'); $('v3d').setAttribute('aria-pressed', v === '3d');
-    $('c2d').hidden = v !== '2d'; $('c3d').hidden = v !== '3d'; $('camBtns').hidden = v !== '3d'; $('hud').hidden = v !== '3d';
+    $('c2d').hidden = v !== '2d'; $('c3d').hidden = v !== '3d'; $('camBtns').hidden = v !== '3d'; $('cutCtl').hidden = v !== '3d'; $('hud').hidden = v !== '3d';
     $('viewHint').textContent = v === '3d' ? '左鍵旋轉 · 右鍵/Shift 平移 · 滾輪縮放 · 拖曳乘員移動' : '滾輪縮放 · 拖曳平移 · 雙擊恢復自動鏡頭 · 拖曳乘員或命中點（十字）';
     $('camAuto').hidden = true; const vh = $('viewHint'); vh.style.opacity = 1; clearTimeout(window.__vh); window.__vh = setTimeout(() => { vh.style.opacity = 0; }, 6000);
     resize();
@@ -205,6 +205,10 @@
   $('v2d').addEventListener('click', () => setView('2d'));
   $('v3d').addEventListener('click', () => setView('3d'));
   $('camBtns').addEventListener('click', e => { const b = e.target.closest('[data-cam]'); if (b && r3d) { r3d.applyCam(b.dataset.cam); drawNow(); } });
+  // 實心／半透明分界（剖切位置）
+  $('cutRange').value = S.opts.cut || 0;
+  $('cutRange').addEventListener('input', e => { S.opts.cut = +e.target.value; if (r3d) r3d.setCut(S.opts.cut / 100); save(); drawNow(); });
+  $('cutRange').addEventListener('dblclick', e => { e.target.value = 0; e.target.dispatchEvent(new Event('input')); });
   function resize() { r2d.resize(); if (r3d && S.view === '3d') r3d.resize(); drawNow(); }
   new ResizeObserver(() => resize()).observe($('viewport'));
   // 3D 互動時重繪

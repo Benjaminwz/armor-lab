@@ -223,7 +223,7 @@
       for (let i = 0; i < 36; i++) { const s = new T.Sprite(new T.SpriteMaterial({ map: ft, blending: T.AdditiveBlending, depthWrite: false, transparent: true })); s.visible = false; this.shotIn.add(s); this.flameSpr.push(s); }
       this.heatLight = new T.PointLight(0xff7a30, 0, 1.6, 2); this.shotIn.add(this.heatLight);
     }
-    this.sparks = this.makePoints(220, 0.018, true, this.shotIn);
+    this.sparks = this.makePoints(220, 0.009, true, this.shotIn);
     this.detFrag = this.makePoints(80, 0.02, false, this.shotIn);
     if (res.cls === 'CE' && res.jet) {
       const g = new T.CylinderGeometry(1, 1, 1, 6); g.rotateZ(Math.PI / 2);
@@ -256,41 +256,52 @@
     this.applyXray(true);
     if (this.camMode !== 'user') this.applyCam(this.camMode === 'auto' ? 'auto' : this.camMode, true);
   };
+  /** 實心／半透明分界的兩個剖切平面（世界座標，法向沿車寬 z）——所有車體與裝甲材質共用 */
+  R3D.prototype.cutPlanes = function () {
+    const T = this.T;
+    if (!this.CP) this.CP = { s: new T.Plane(new T.Vector3(0, 0, -1), 0), g: new T.Plane(new T.Vector3(0, 0, 1), 0) };
+    return this.CP;
+  };
+  /** f ∈ [-1, 1]：-1 全半透明、0 中線剖切、+1 全實心 */
+  R3D.prototype.setCut = function (f) {
+    this.cutF = Math.max(-1, Math.min(1, +f || 0));
+    const CP = this.cutPlanes(); const c = this.cutF * (this.cutSpan || 2.5);
+    CP.s.constant = c; CP.g.constant = -c; this.dirty = true;
+  };
   /* ----- 車體 ----- */
   R3D.prototype.buildHull = function () {
     const T = this.T, h = this.sc.hull, poly = h.poly; const hz = h.D / 2;
     const ext = this.mat('hull'), inn = this.mat('inner'), flo = this.mat('floor'); const cut = new T.MeshStandardMaterial({ color: 0x3a4232, roughness: 0.85, metalness: 0.3 });
     // 近側半邊：半透明，讓車內可見但車體仍是完整的一整台
-    const ghost = m => { const g = m.clone(); g.transparent = true; g.opacity = 0.16; g.depthWrite = false; g.__ghost = true; return g; };
+    // 實心／半透明分界：可調整的剖切平面 z = c（c 以下實心、以上半透明）
+    const CP = this.cutPlanes();
+    const ghost = m => { const g = m.clone(); g.transparent = true; g.opacity = 0.16; g.depthWrite = false; g.__ghost = true; g.clippingPlanes = [CP.g]; return g; };
+    [ext, inn, flo].forEach(m => { m.side = T.DoubleSide; m.clippingPlanes = [CP.s]; });
     const extG = ghost(ext), innG = ghost(inn), floG = ghost(flo);
-    this.hullMats = [ext, inn, flo, cut, extG, innG, floG];
+    this.hullMats = [ext, inn, flo, cut, extG, innG, floG]; void cut;
     const g = new T.Group(); this.world.add(g); this.hullGroup = g;
+    this.cutSpan = hz + 0.75; this.setCut(this.cutF != null ? this.cutF : 0);
+    /** 同一幾何建兩個網格：實心（剖切面以下）＋半透明（以上） */
+    const add2 = (geo, mS, mG, setup) => [[mS, true], [mG, false]].forEach(([m, solid]) => { const o = new T.Mesh(geo, m); setup(o); o.castShadow = solid; o.receiveShadow = true; g.add(o); });
     this.barrel = null;
     poly.forEach((p, i) => {
       const q = poly[(i + 1) % poly.length]; const ed = p.edge; if (ed.k === 'plate') return;
       const t = Math.max(ed.t, 0.02); const dx = q.x - p.x, dy = q.y - p.y; const L = Math.hypot(dx, dy);
-      const depth = hz + t;
+      const depth = 2 * (hz + t);
       const mx = (p.x + q.x) / 2 + ed.on[0] * t / 2, my = (p.y + q.y) / 2 + ed.on[1] * t / 2;
-      [-1, 1].forEach(sd => {
-        const geo = scaleUV(new T.BoxGeometry(L + t * 0.6, t, depth), L / 1.2, depth / 1.2);
-        const inner = ed.k === 'floor' ? (sd < 0 ? flo : floG) : (sd < 0 ? inn : innG);
-        const E = sd < 0 ? ext : extG;
-        const m = new T.Mesh(geo, [E, E, E, inner, sd < 0 ? cut : E, sd < 0 ? E : cut]);
-        m.position.set(mx, my, sd * depth / 2); m.rotation.z = Math.atan2(dy, dx);
-        m.castShadow = sd < 0; m.receiveShadow = true; g.add(m);
-      });
+      const geo = scaleUV(new T.BoxGeometry(L + t * 0.6, t, depth), L / 1.2, depth / 1.2);
+      const fl = ed.k === 'floor';
+      add2(geo, [ext, ext, ext, fl ? flo : inn, ext, ext], [extG, extG, extG, fl ? floG : innG, extG, extG], m => { m.position.set(mx, my, 0); m.rotation.z = Math.atan2(dy, dx); });
     });
-    // 兩側側板（遠側實心、近側半透明）
+    // 兩側側板
     const shp = new T.Shape(); h.outer.forEach((p, i) => i ? shp.lineTo(p.x, p.y) : shp.moveTo(p.x, p.y));
     const sideG = new T.ExtrudeGeometry(shp, { depth: 0.04, bevelEnabled: false });
     const uv = sideG.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 1.2, uv.getY(i) / 1.2);
-    const side = new T.Mesh(sideG, [inn, ext]); side.position.z = -hz - 0.042; side.receiveShadow = true; side.castShadow = true; g.add(side);
-    const side2 = new T.Mesh(sideG, [innG, extG]); side2.position.z = hz + 0.002; g.add(side2);
+    [-hz - 0.042, hz + 0.002].forEach(z => add2(sideG, [inn, ext], [innG, extG], m => { m.position.z = z; }));
     const fwI = poly.findIndex(p => p.k === 'fw'); const ex = h.ext || {};
     if (fwI >= 0 && ex.len) {
       const top = poly[fwI]; const nose = Math.min(...poly.map(p => p.x)); const xr = Math.max(top.x + 0.6, nose + ex.len * 0.97);
-      const bay = new T.Mesh(scaleUV(new T.BoxGeometry(xr - top.x, top.y + 0.05, 2 * (hz + 0.05)), 2, 2), ext);
-      bay.position.set((xr + top.x) / 2, (top.y + 0.05) / 2 - 0.03, 0); bay.castShadow = true; bay.receiveShadow = true; g.add(bay); this.bayX = xr;
+      add2(scaleUV(new T.BoxGeometry(xr - top.x, top.y + 0.05, 2 * (hz + 0.05)), 2, 2), ext, extG, m => { m.position.set((xr + top.x) / 2, (top.y + 0.05) / 2 - 0.03, 0); }); this.bayX = xr;
       // 發動機艙蓋格柵
       const gm = new T.MeshStandardMaterial({ color: 0x1c2018, roughness: 0.9, metalness: 0.4 });
       for (let k = 0; k < 8; k++) { const r = new T.Mesh(new T.BoxGeometry(0.03, 0.012, 2 * hz * 0.7), gm); r.position.set(top.x + 0.4 + k * (xr - top.x - 0.8) / 8, top.y + 0.055, 0); g.add(r); }
@@ -313,7 +324,7 @@
         const tr2 = tr.clone(); tr2.position.y = 0.02; g.add(tr2);
         for (let x = nose - 0.05; x < rear + 0.1; x += 0.16) { const sh = new T.Mesh(new T.BoxGeometry(0.03, 0.02, 0.6), tm); sh.position.set(x, yc - r - 0.065, zc); g.add(sh); }
         // 側裙
-        const skirt = new T.Mesh(scaleUV(new T.BoxGeometry(rear - nose, 0.45, 0.03), 4, 1), sd < 0 ? ext : extG); skirt.position.set((rear + nose) / 2, 0.02, sd * (hz + 0.6)); skirt.castShadow = sd < 0; g.add(skirt);
+        add2(scaleUV(new T.BoxGeometry(rear - nose, 0.45, 0.03), 4, 1), ext, extG, m => { m.position.set((rear + nose) / 2, 0.02, sd * (hz + 0.6)); });
       });
     }
     if (ex.gun) {
@@ -359,7 +370,7 @@
       const m = root.DATA.MATS[s.mat] || root.DATA.MATS.RHA;
       const side = surfMat(this, T, m); side.side = T.DoubleSide; side.__op = side.opacity; side.__glass = side.transparent;
       const sideG = side.clone(); sideG.transparent = true; sideG.opacity = Math.min(side.opacity, 0.18); sideG.depthWrite = false; sideG.__ghost = true;
-      const farPlane = new T.Plane(new T.Vector3(0, 0, -1), 0), nearPlane = new T.Plane(new T.Vector3(0, 0, 1), 0);
+      const CP = this.cutPlanes(); const farPlane = CP.s, nearPlane = CP.g;
       const cut = new T.MeshStandardMaterial({ map: this.hatchTex(s.mat), roughness: 0.8, metalness: 0.1 });
       const piv = new T.Group(); piv.position.set((s.p0 + s.p1) / 2 + ym * tn, ym, 0); piv.rotation.z = -th;
       this.shotIn.add(piv);
@@ -406,9 +417,10 @@
       const frame = new T.Mesh(new T.BoxGeometry(tN, len, 2 * hz), [cut, cut, cut, cut, cut, cut]);
       frame.scale.set(1, 1, 1); frame.visible = false; piv.add(frame);
       [['y', -len / 2], ['y', len / 2]].forEach(([, y]) => { const e = new T.Mesh(new T.BoxGeometry(tN, 0.002, 2 * hz), side); e.position.y = y; piv.add(e); });
-      [-hz, hz].forEach(z => { const e = new T.Mesh(new T.BoxGeometry(tN, len, 0.002), z < 0 ? side : sideG); e.position.z = z; piv.add(e); });
+      [-hz, hz].forEach(z => [side, sideG].forEach(mm => { const e = new T.Mesh(new T.BoxGeometry(tN, len, 0.002), mm); e.position.z = z; piv.add(e); }));
+      [-len / 2, len / 2].forEach(y => { const e = new T.Mesh(new T.BoxGeometry(tN, 0.002, 2 * hz), sideG); e.position.y = y; piv.add(e); });
       // 彈坑內壁（沿彈道的錐管，於彈道群組中）
-      const tube = new T.Mesh(new T.CylinderGeometry(1, 1, 1, 28, 1, true), new T.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.55, metalness: 0.7, side: T.DoubleSide, emissive: 0x000000 }));
+      const tube = new T.Mesh(new T.CylinderGeometry(1, 1, 1, 28, 1, true), new T.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.55, metalness: 0.7, side: T.DoubleSide, emissive: 0x000000, clippingPlanes: [farPlane] }));
       tube.rotation.z = -Math.PI / 2; tube.visible = false; this.shotIn.add(tube); P.tube = tube;
       // 剖切面（z = 0）以剖面線顯示
       this.plates.push(P);
@@ -478,8 +490,16 @@
         const L = Math.max(dEnd - s.p0, 0.0005);
         const r1 = Rf * 0.92, r2 = perf ? Rb * 0.92 : Math.max(Rf * 0.6, 0.002);
         P.tube.visible = true; P.tube.geometry.dispose();
-        P.tube.geometry = new T.CylinderGeometry(r2, r1, L, 20, 1, true, Math.PI / 2, Math.PI); // 只有遠半（z ≤ 0）
-        P.tube.position.set(s.p0 + L / 2, 0, 0);
+        // 斜切管：入口端落在板正面（x = p0 + y·tanθ），出口端落在背面或目前彈坑底，與板面完全貼合
+        const tnT = Math.tan(th), NS = 40, vtx = [], ix = [];
+        for (let j = 0; j <= NS; j++) {
+          const a = j / NS * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+          const y1 = r1 * ca, z1 = r1 * sa, y2 = r2 * ca, z2 = r2 * sa;
+          vtx.push(s.p0 + y1 * tnT, y1, z1, perf ? s.p1 + y2 * tnT : Math.max(dEnd + y2 * tnT, s.p0 + y2 * tnT + 0.0005), y2, z2);
+          if (j < NS) { const b = j * 2; ix.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+        }
+        const tg = new T.BufferGeometry(); tg.setAttribute('position', new T.Float32BufferAttribute(vtx, 3)); tg.setIndex(ix); tg.computeVertexNormals();
+        P.tube.geometry = tg; P.tube.rotation.set(0, 0, 0); P.tube.position.set(0, 0, 0);
         const hot = Math.max(0, Math.min(1, ((F.maxT || 20) - 550) / 900));
         P.tube.material.emissive.setRGB(hot * 0.35, hot * 0.1, hot * 0.02);
       } else P.tube.visible = false;
@@ -560,7 +580,7 @@
     });
     if (geo.tracer) {
       const tr = new T.Sprite(new T.SpriteMaterial({ map: this.radialTex('tracer', [[0, 'rgba(255,230,200,1)'], [0.3, 'rgba(255,90,50,.8)'], [1, 'rgba(255,40,20,0)']]), blending: T.AdditiveBlending, depthWrite: false, transparent: true }));
-      const s = Math.max(geo.tracer.r * 7, 0.03); tr.scale.set(s, s, 1); tr.position.x = geo.tracer.x; this.pTail.add(tr); this.tracer = tr;
+      const s = Math.max(geo.tracer.r * 2.6, 0.01); // 曳光劑燃燒面約與彈底同尺寸 tr.scale.set(s, s, 1); tr.position.x = geo.tracer.x; this.pTail.add(tr); this.tracer = tr;
     }
     // 頭部激波（超音速）
     if (geo.mach && (sc.res.impactV || 0) > 360) {
