@@ -844,8 +844,9 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
       if (S.view === '3d') { const sx = dw / src.clientWidth; g.setTransform(sx, 0, 0, sx, ox, oy); window.Render2D.overlay(g, src.clientWidth, src.clientHeight, SC, st || simAt(P.d), { footer: 1 }); }
       if (this.active && this.mode === 'webcodecs') this.encodeFrame();
     },
-    async start(auto) {
+    async start(auto, noAudio) {
       if (this.active) return;
+      if (!noAudio) this.retried = false;
       const [w, h] = this.size(); this.W = w; this.H = h; this.cv.width = w; this.cv.height = h; this.auto = !!auto;
       this.compose();
       const wantMp4 = S.opts.rec !== 'webm';
@@ -859,11 +860,24 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
       if (!MR) { toast('此瀏覽器不支援錄影'); this.W = 0; return; }
       this.ext = mime.includes('mp4') ? 'mp4' : 'webm';
       const stream = this.cv.captureStream(60);
-      try { const ad = window.SFX && window.SFX.streamDest(); if (ad) ad.stream.getAudioTracks().forEach(tr => stream.addTrack(tr)); } catch (_) { }
+      // 音軌：AAC 只接受 8–96 kHz；取樣率不合時只錄影像，避免編碼器中途失敗
+      try { const ad = !noAudio && window.SFX && window.SFX.streamDest(); const sr = ad ? ad.context.sampleRate : 0; if (ad && (this.ext !== 'mp4' || (sr >= 8000 && sr <= 96000))) ad.stream.getAudioTracks().forEach(tr => stream.addTrack(tr)); } catch (_) { }
+      this.hasAudio = stream.getAudioTracks().length > 0;
       try { this.mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 12e6 } : undefined); } catch (e) { toast('無法開始錄影'); this.mr = null; this.W = 0; return; }
-      this.mode = 'mr'; this.active = true; this.chunks = [];
+      this.mode = 'mr'; this.active = true; this.chunks = []; this.mrErr = null;
       this.mr.ondataavailable = e => { if (e.data && e.data.size) this.chunks.push(e.data); };
-      this.mr.onstop = () => { this.blob = new Blob(this.chunks, { type: mime || 'video/webm' }); this.finish(); };
+      this.mr.onerror = e => { this.mrErr = (e.error && e.error.message) || 'encoder error'; console.warn('MediaRecorder', this.mrErr); };
+      this.mr.onstop = () => {
+        const size = this.chunks.reduce((s, c) => s + c.size, 0);
+        if (this.mrErr && this.hasAudio && !this.retried) {
+          // 音訊編碼失敗：改為只錄影像，自動重新開始
+          this.retried = true; this.active = false; this.mr = null; this.W = 0; setRecUI();
+          toast('音訊編碼失敗，改為無音軌錄影'); this.start(this.auto, true); return;
+        }
+        if (!size) { toast('錄影失敗：' + (this.mrErr || '沒有錄到任何畫面')); this.reset(); return; }
+        if (this.mrErr) toast('錄影中途發生錯誤，已保留錯誤前的片段');
+        this.blob = new Blob(this.chunks, { type: mime || 'video/webm' }); this.finish();
+      };
       this.mr.start(250); setRecUI();
       if (wantMp4 && this.ext !== 'mp4') toast('此瀏覽器無法輸出 MP4，改錄 WebM');
     },
@@ -896,6 +910,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
       this.active = false; setRecUI();
       try { await this.enc.flush(); this.muxer.finalize(); this.blob = new Blob([this.target.buffer], { type: 'video/mp4' }); } catch (e) { toast('MP4 封裝失敗'); this.reset(); return; }
       try { this.enc.close(); } catch (_) { }
+      if (!this.blob.size || !this.frame) { toast('錄影失敗：沒有錄到任何畫面'); this.reset(); return; }
       this.finish();
     },
     finish() { this.active = false; this.mr = null; this.enc = null; this.muxer = null; this.W = 0; setRecUI(); this.showModal(); },
