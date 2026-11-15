@@ -17,6 +17,7 @@
   /* ---------------- 判定 ---------------- */
   const VCOL = { cp: '#f0685a', pp: '#4cc57a', warn: '#f2c94c' };
   const VERDICT = res => {
+    if (res && res.meme) return { code: res.meme[0], word: res.meme[1], cls: 'cp', sub: res.meme[2], color: VCOL.cp };
     const m = {
       perforated: ['CP', '完全貫穿', 'cp', '殘餘侵徹體進入艙內'],
       stopped: ['PP', '未貫穿', 'pp', '部分侵徹，裝甲擋下'],
@@ -83,11 +84,19 @@
     if (S.crewVeh !== id) { S.crew = clone(HULL.crew); S.crewVeh = id; }
     else S.crew = S.crew.map(c => window.Hull.fitCrew(HULL, c));
   }
+  /** 離譜彈種：在正常模擬結果上蓋一層玩梗敘述 */
+  function applyMeme() {
+    const mm = ammo().meme; if (!mm || !RES || !BEH) return;
+    RES.meme = mm.v; if (!RES.memeNoted) { RES.notes = mm.notes.concat(['離譜彈種僅供娛樂：模型是為戰車砲尺度校準的，這些數字不具參考價值。']); RES.memeNoted = true; }
+    if (mm.kill) { BEH.crew.forEach(c => { c.sev = 3; c.why = [mm.nuke ? '蒸發' : '與車體一同消失']; }); BEH.kill.K = BEH.kill.M = BEH.kill.F = true; }
+    else if (mm.spare) { BEH.crew.forEach(c => { c.sev = 0; c.why = ['聽到「啪」的一聲']; }); BEH.kill.K = BEH.kill.M = BEH.kill.F = BEH.kill.X = false; }
+    BEH.events = mm.ev.map(([t, text]) => ({ t, text }));
+  }
   function compute() {
     const a = ammo(); const e = env();
     RES = E.simulate(a, S.stack, e);
     buildHull();
-    BEH = E.behind(RES, HULL, S.crew, e);
+    BEH = E.behind(RES, HULL, S.crew, e); applyMeme();
     const geo = window.PG.geometry(a); const seq = window.PG.sequence(RES, a, geo);
     (RES.events || []).forEach(ev => { if (ev.type === 'era' && ev.tandem && seq.tPre != null) ev.tVis = seq.tPre + 4e-5; });
     SC = { res: RES, beh: BEH, ammo: a, stack: S.stack, env: e, comp: S.comp, hull: HULL, geo, seq, crew: S.crew, armorName: presetName() };
@@ -101,7 +110,7 @@
     if (!P.playing) { P.d = curCh() ? 0 : P.dur; drawNow(); }
   }
   function computeBehindOnly() {
-    BEH = E.behind(RES, HULL, S.crew, env());
+    BEH = E.behind(RES, HULL, S.crew, env()); applyMeme();
     SC.beh = BEH; SC.crew = S.crew; buildTimeline();
     r2d.setScene(SC);
     if (r3d && S.view === '3d' && r3d.sc) { r3d.setBehind(SC); S.crew.forEach((c, i) => r3d.moveCrew(i, c)); }
@@ -222,11 +231,12 @@
   $('c3d').addEventListener('wheel', () => { if (r3d) r3d.dirty = true; }, { passive: true });
 
   /* ---------------- 彈藥面板 ---------------- */
-  function groupOf(cls) { return D.CLASS_GROUP.find(g => g.cls.includes(cls)) || D.CLASS_GROUP[0]; }
+  function groupOf(cls, a) { return (a && a.joke && D.CLASS_GROUP.find(g => g.joke)) || D.CLASS_GROUP.find(g => g.cls.includes(cls)) || D.CLASS_GROUP[0]; }
+  const inGroup = (g, x) => g.joke ? !!x.joke : (!x.joke && g.cls.includes(x.cls));
   function renderAmmo() {
-    const a = ammo(); const g = groupOf(a.cls);
+    const a = ammo(); const g = groupOf(a.cls, a);
     $('ammoGroups').innerHTML = D.CLASS_GROUP.map(x => `<button class="chip" data-g="${x.key}" aria-pressed="${x.key === g.key}">${x.label}</button>`).join('');
-    const list = D.AMMO.filter(x => g.cls.includes(x.cls));
+    const list = D.AMMO.filter(x => inGroup(g, x));
     $('ammoSel').innerHTML = list.map(x => `<option value="${x.id}" ${x.id === S.ammoId ? 'selected' : ''}>${esc(x.name)}　${esc(x.nation)} ${x.year}</option>`).join('');
     $('ammoClassTag').textContent = (D.CLASS_LABEL[a.cls] || a.cls) + ' · ' + a.cls;
     const v = E.velocityAt(a, S.range);
@@ -289,7 +299,7 @@
   $('ammoReset').addEventListener('click', () => { delete S.ov[S.ammoId]; save(); renderAmmo(); compute(); });
   $('ammoGroups').addEventListener('click', e => {
     const b = e.target.closest('[data-g]'); if (!b) return;
-    const g = D.CLASS_GROUP.find(x => x.key === b.dataset.g); const first = D.AMMO.find(x => g.cls.includes(x.cls));
+    const g = D.CLASS_GROUP.find(x => x.key === b.dataset.g); const first = D.AMMO.find(x => inGroup(g, x));
     selectAmmo(first.id);
   });
   $('ammoSel').addEventListener('change', e => selectAmmo(e.target.value));
@@ -1168,6 +1178,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
     const res = SC.res, seq = SC.seq || {};
     const tc = res.cls === 'CE' || res.cls === 'HESH' ? seq.tContact : 0;
     if (cross(tc)) { if (res.verdict === 'ricochet') A.ricochet(); else A.impact(res.cls !== 'CE'); }
+    const mm = SC.ammo.meme; if (mm && mm.flash && cross(tc)) { A.boom(1.5); const fl = $('memeFlash'); fl.style.setProperty('--fl', mm.flash); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go'); }
     if (res.cls === 'CE' && cross(seq.tDet)) A.boom(Math.min(1, (SC.ammo.CD || 100) / 150) * 0.7);
     if (res.cls === 'CE' && cross(seq.tPre)) A.boom(0.15);
     if (res.cls === 'HESH' && cross(0)) A.boom(0.6);

@@ -282,6 +282,10 @@ table.t tr.clickable:hover td { background: var(--panel-2); }
 .card > header h2 { margin: 0; font-size: 14px; letter-spacing: .12em; font-weight: 700; color: var(--ink-2); }
 .card > header .tag { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
 .card .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.meme-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 4; }
+.meme-flash.go { animation: memeFlash 2.2s ease-out; }
+@keyframes memeFlash { 0% { opacity: var(--fl, 1); } 12% { opacity: var(--fl, 1); } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .meme-flash.go { animation: none; } }
 .howto { margin: 0 0 10px; padding-left: 22px; display: grid; gap: 4px; color: var(--ink-2); }
 .howto b { color: var(--ink); }
 .lessons { display: grid; gap: 14px; margin-top: 12px; }
@@ -473,6 +477,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
         <span id="camBtns" hidden style="display:contents"><button data-cam="impact">撞擊</button><button data-cam="section">剖面</button><button data-cam="oblique">斜視</button><button data-cam="inside">車內</button><button data-cam="chase">追彈</button></span>
         <button id="camAuto" hidden>恢復自動鏡頭</button>
       </div>
+      <div class="meme-flash" id="memeFlash" aria-hidden="true"></div>
       <div class="vp-hint" id="viewHint"></div>
     </div>
     <div class="transport">
