@@ -150,7 +150,7 @@
     const ctx = this.ctx, dpr = this.dpr || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const xr = this.xray;
-    ctx.fillStyle = xr ? XR.bg : '#0a0d10'; ctx.fillRect(0, 0, this.W, this.H);
+    ctx.fillStyle = xr ? XR.bg : (root.__sceneBg || '#0a0d10'); ctx.fillRect(0, 0, this.W, this.H);
     if (!this.sc || !this.camA) { ctx.fillStyle = MUTED; ctx.font = '13px sans-serif'; ctx.fillText('載入中…', 20, 40); return; }
     const f = this.state.focus || 0;
     const main = this.userCam || this.camAt(f);
@@ -717,8 +717,14 @@
       this.sparks(this.lx(s.p0), this.ly(0), t, 0, 3e-4, '#ffd08a', 40, Math.PI); return;
     }
     const s = this.apState(t);
-    if (t <= 0) this.drawMach(s.tip, res.impactV, geo, 0);
-    if (!(s.out && s.tip - (geo ? geo.len : 0) > this.pEnd + 0.02)) this.drawGeo(geo, s.tip, { cut: this.xray || t > 0, hide: capOff });
+    // 引擎的 tip 是「侵徹體鼻端」；風帽尖端在它前方 off 處，先接觸、先被壓扁
+    const hd = root.PG.head(geo), off = hd.off, xg = s.tip + off, f0 = this.firstFace(), pF = f0 ? f0.p0 : 0;
+    const wsHide = p => /風帽/.test(p.name || '');
+    if (t <= 0) this.drawMach(xg, res.impactV, geo, 0);
+    if (!(s.out && s.tip - (geo ? geo.len : 0) > this.pEnd + 0.02)) {
+      this.drawGeo(geo, xg, { cut: this.xray || t > 0, hide: off > 0 ? wsHide : capOff });
+      if (off > 0 && t <= 0) { const c = clamp(xg - pF, 0, off * 0.97); this.drawGeo({ parts: geo.parts.filter(wsHide), fins: [], noseLen: geo.noseLen, rMax: geo.rMax, body: geo.body }, xg - c, { crush: c }); }
+    }
     if (t > 0) this.drawImpact(t, res.exitT || 4e-4, false);
     if (t > 1.5e-5 && t < 6e-4 && geo && geo.parts.some(p => /風帽/.test(p.name || ''))) {
       const ctx = this.ctx, k = this.cam.k; ctx.save(); ctx.fillStyle = 'rgba(170,170,160,.85)';

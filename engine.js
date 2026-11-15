@@ -158,12 +158,19 @@
   };
 
   /* ---------------- 彈速衰減 ---------------- */
-  E.velocityAt = function (ammo, range) {
+  /**
+   * 彈速：v(R) = v0' · exp(−R/λ)。
+   * 環境修正：發射藥溫度改變初速（約每 °C ±0.1%，以 21 °C 為準）；
+   * 空氣阻力與空氣密度成正比，所以衰減長度 λ 與密度成反比。
+   */
+  E.envV0 = function (ammo, env) { const Tp = env && env.propT != null ? env.propT : 21; return ammo.v0 * (1 + 0.001 * clamp(Tp - 21, -60, 50)); };
+  E.velocityAt = function (ammo, range, env) {
     if (!ammo.v0) return 0;
+    const v0 = E.envV0(ammo, env), rho = env && env.airRho ? env.airRho : 1;
     const dv = clamp(ammo.dvkm || 0, 0, ammo.v0 * 0.9);
-    if (dv <= 0) return ammo.v0;
-    const lam = -1000 / Math.log(1 - dv / ammo.v0);
-    return ammo.v0 * Math.exp(-range / lam);
+    if (dv <= 0) return v0;
+    const lam = -1000 / Math.log(1 - dv / ammo.v0) / rho;
+    return v0 * Math.exp(-range / lam);
   };
 
   /* ---------------- 斜面倍率表（全口徑/次口徑） ---------------- */
@@ -272,7 +279,7 @@
   }
 
   function simKE(ammo, subs, env, R) {
-    const v = E.velocityAt(ammo, env.range || 0);
+    const v = E.velocityAt(ammo, env.range || 0, env);
     const rod = rodFromAmmo(ammo, v);
     const res = R;
     res.impactV = v; res.model = 'Tate'; res.timeline = [];
@@ -397,7 +404,7 @@
 
   function simDeMarre(ammo, subs, env, res) {
     if (!ammo.K) E.calibrateDeMarre(ammo);
-    let v = E.velocityAt(ammo, env.range || 0);
+    let v = E.velocityAt(ammo, env.range || 0, env);
     const d = (ammo.dc || ammo.d) / 1000, m = ammo.mc || ammo.m;
     res.impactV = v; res.model = 'DeMarre';
     res.segments = [];
@@ -675,7 +682,7 @@
      碎甲彈（HESH / HEP）
      ===================================================================== */
   function simHESH(ammo, subs, env, res) {
-    const v = E.velocityAt(ammo, env.range || 0);
+    const v = E.velocityAt(ammo, env.range || 0, env);
     res.impactV = v; res.model = 'HESH';
     let i = 0; while (i < subs.length && subs[i].kind === 'gap') i++;
     const s0 = subs[i];

@@ -31,7 +31,7 @@
     W: { c: '#a9b1b8', m: 0.9, r: 0.32 }, DU: { c: '#4b5047', m: 0.75, r: 0.45 }, STEEL: { c: '#8a939c', m: 0.85, r: 0.38 },
     CU: { c: '#c27a4a', m: 0.9, r: 0.3 }, TA: { c: '#8f8a9e', m: 0.85, r: 0.35 }, alu: { c: '#c9ced3', m: 0.8, r: 0.28 },
     steel2: { c: '#6f7882', m: 0.8, r: 0.42 }, brass: { c: '#b8913f', m: 0.9, r: 0.3 }, copper: { c: '#b06a3a', m: 0.9, r: 0.3 },
-    olive: { c: '#4f5a3f', m: 0.25, r: 0.6 }, olive2: { c: '#626e4c', m: 0.25, r: 0.55 }, dark: { c: '#2d3136', m: 0.4, r: 0.6 },
+    potato: { c: '#b58d55', m: 0, r: 0.95 }, olive: { c: '#4f5a3f', m: 0.25, r: 0.6 }, olive2: { c: '#626e4c', m: 0.25, r: 0.55 }, dark: { c: '#2d3136', m: 0.4, r: 0.6 },
     sand: { c: '#a99a6c', m: 0.2, r: 0.65 }, black: { c: '#1e2124', m: 0.3, r: 0.5 }, shell: { c: '#5d5a3c', m: 0.5, r: 0.5 },
     filler: { c: '#d8c45a', m: 0, r: 0.8 }, hesh: { c: '#d8c45a', m: 0, r: 0.8 }, tombac: { c: '#b98a52', m: 0.9, r: 0.32 },
     red: { c: '#9b2a22', m: 0.3, r: 0.5 }, wood: { c: '#7a5a36', m: 0, r: 0.8 }, tracer: { c: '#ff6a3a', m: 0, r: 0.5, glow: 1 }
@@ -77,10 +77,43 @@
   /* ---------- 建構 ---------- */
   PG.geometry = function (a) {
     if (!a) return null;
+    if (a.id === 'J_POTATO') return geoPotato(a);
     if (a.cls === 'APFSDS') return geoRod(a);
     if (a.cls === 'EFP') return geoEFP(a);
     if (a.cls === 'HEAT') return HEAT[a.id] && HEAT[a.id].form === 'shell' ? geoHeatShell(a) : geoHEAT(a);
     return geoShell(a);
+  };
+
+  /** 一顆馬鈴薯：不規則的橢圓體，沒有風帽、彈帶與曳光劑 */
+  function geoPotato(a) {
+    const R = a.d / 2000, L = R * 3.2, pts = [[0, 0]];
+    for (let i = 1; i < 20; i++) { const u = i / 20; pts.push([-u * L, R * Math.pow(Math.sin(Math.PI * u), 0.55) * (1 + 0.1 * Math.sin(7 * u + 1) + 0.06 * Math.sin(13 * u))]); }
+    pts.push([-L, 0]);
+    return { kind: 'shell', parts: [{ name: '馬鈴薯', pts, mat: 'potato' }], inner: [], fins: [], tracer: null, len: L, rMax: R * 1.16, noseLen: L * 0.25, body: { x0: 0, x1: -L, r: R }, mach: 0 };
+  }
+  /**
+   * 碰撞用的彈頭外形——與畫面上實際接觸裝甲的那個實體完全相同。
+   * off：侵徹體最前端在風帽尖端之後多遠（風帽是中空薄殼，接觸時被壓扁，不算侵徹體）
+   * lag(q)：在半徑比 q（0–1，相對彈體最大半徑）處，外形表面落後最前端多少公尺
+   */
+  PG.head = function (geo) {
+    const flat = { off: 0, lag: () => 0, lagMax: 0 };
+    if (!geo || geo.kind === 'rod' || geo.kind === 'efp' || geo.kind === 'heat' || geo.kind === 'hesh') return flat;
+    const solid = geo.parts.filter(p => !/風帽|彈帶/.test(p.name || ''));
+    if (!solid.length) return flat;
+    let xF = -1e9, R = 0; solid.forEach(p => p.pts.forEach(([x, r]) => { if (x > xF) xF = x; if (r > R) R = r; }));
+    if (!(R > 0)) return flat;
+    const N = 24, tab = new Float64Array(N + 1);
+    for (let i = 0; i <= N; i++) {
+      const rho = R * i / N; let best = 1e9;
+      solid.forEach(p => { for (let k = 0; k < p.pts.length; k++) {
+        const [x1, r1] = p.pts[k]; if (r1 >= rho - 1e-12) best = Math.min(best, xF - x1);
+        if (k) { const [x0, r0] = p.pts[k - 1]; if ((r0 - rho) * (r1 - rho) < 0) best = Math.min(best, xF - (x0 + (x1 - x0) * (rho - r0) / (r1 - r0))); }
+      } });
+      tab[i] = best > 1e8 ? (i ? tab[i - 1] : 0) : Math.max(best, i ? tab[i - 1] : 0);
+    }
+    const lag = q => { const u = Math.max(0, Math.min(1, q)) * N, i = Math.min(N - 1, Math.floor(u)); return tab[i] + (tab[i + 1] - tab[i]) * (u - i); };
+    return { off: Math.max(0, -xF), lag, lagMax: tab[N] };
   };
 
   function rodMat(m) { return m === 'DU' ? 'DU' : m === 'STEEL' ? 'STEEL' : m === 'CU' ? 'CU' : m === 'TA' ? 'TA' : 'W'; }

@@ -58,7 +58,8 @@
     if (ammoCache.key !== key) { const o = Object.assign({}, baseAmmo(S.ammoId), S.ov[S.ammoId] || {}); if (o.ref) o.ref = Object.assign({}, o.ref); delete o.tb; delete o.K; ammoCache = { key, obj: o }; }
     return ammoCache.obj;
   }
-  const env = () => ({ alpha: S.alpha, beta: S.beta, descent: S.descent, range: S.range, standoff: S.standoff, slatMode: S.slatMode, seed: S.seed, hitY: S.hitY });
+  const envDef = () => (D.ENVS || []).find(e => e.id === S.envId) || (D.ENVS || [])[0] || {};
+  const env = () => ({ ambT: envDef().ambT, propT: envDef().propT, airRho: envDef().airRho, envId: envDef().id, alpha: S.alpha, beta: S.beta, descent: S.descent, range: S.range, standoff: S.standoff, slatMode: S.slatMode, seed: S.seed, hitY: S.hitY });
   const presetName = () => { const p = D.PRESETS.find(x => x.id === S.presetId); const mod = p && JSON.stringify(p.layers) !== JSON.stringify(S.stack); return (p ? p.name : '自訂') + (mod ? '（已修改）' : ''); };
 
   /* ---------------- 渲染器 ---------------- */
@@ -66,7 +67,7 @@
   let r3d = null;
   const threeOK = !!window.THREE;
   if (!threeOK) { $('v3d').disabled = true; $('v3d').title = '3D 函式庫未能載入'; }
-  function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); r3d.setCut((S.opts.cut || 0) / 100); } } return r3d; }
+  function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); r3d.setCut((S.opts.cut || 0) / 100); r3d.setEnv(envDef()); } } return r3d; }
   r2d.onCrewMove = (i, x, y) => onCrewMove(i, x, y, S.crew[i].z || 0);
   r2d.onCrewDrop = i => onCrewDrop(i);
   window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow(), get S() { return S; }, get BEH() { return BEH; }, compute: () => compute(), sim: (id, stack, e) => { const r = E.simulate(Object.assign({}, baseAmmo(id)), stack, Object.assign(env(), e || {})); return { v: r.verdict, areal: Math.round(projAreal(r)), margin: r.margin }; }, D }; // 偵錯用
@@ -84,10 +85,22 @@
     if (S.crewVeh !== id) { S.crew = clone(HULL.crew); S.crewVeh = id; }
     else S.crew = S.crew.map(c => window.Hull.fitCrew(HULL, c));
   }
-  /** 離譜彈種：在正常模擬結果上蓋一層玩梗敘述 */
+  /** 離譜彈種：在正常模擬結果上蓋一層玩梗敘述。裝甲夠厚時，有些其實擋得住 */
   function applyMeme() {
-    const mm = ammo().meme; if (!mm || !RES || !BEH) return;
-    RES.meme = mm.v; if (!RES.memeNoted) { RES.notes = mm.notes.concat(['離譜彈種僅供娛樂：模型是為戰車砲尺度校準的，這些數字不具參考價值。']); RES.memeNoted = true; }
+    const mm = ammo().meme, A0 = ammo(); if (!mm || !RES || !BEH) return;
+    const los = RES.totalLOS || 0; // mm
+    const held = !mm.spare && (A0.stopAt != null ? los >= A0.stopAt : RES.verdict !== 'perforated');
+    const note = '離譜彈種僅供娛樂：模型是為戰車砲尺度校準的，這些數字不具參考價值。';
+    if (held) {
+      const m = (los / 1000).toFixed(los >= 10000 ? 0 : 1);
+      RES.meme = ['擋', '居然擋住了', `${m} 公尺的裝甲表示情緒穩定`];
+      RES.notes = ['裝甲夠厚的話，再離譜的砲彈也只是在表面挖坑。問題是這塊裝甲每平方公尺重 ' + Math.round(los * 7.85 / 1000) + ' 噸。', note];
+      BEH.crew.forEach(c => { c.sev = 0; c.why = ['問了一句「剛剛是不是有人敲門」']; }); BEH.kill.K = BEH.kill.M = BEH.kill.F = BEH.kill.X = false;
+      BEH.events = [{ t: 0, text: mm.ev[0][1] }, { t: 1e-3, text: A0.stopLine || '裝甲吸收了全部能量' }, { t: 1, text: '車內乘員沒有發現任何異狀' }, { t: 5, text: '結論：解決離譜砲彈的辦法是更離譜的裝甲' }];
+      return;
+    }
+    RES.meme = mm.v; RES.notes = mm.notes.concat([note]);
+    if (mm.nuke && los >= 5000 && A0.stopAt === Infinity) RES.notes.unshift(`${(los / 1000).toFixed(0)} 公尺的鋼板也在火球裡面。厚度對這個沒有用。`);
     if (mm.kill) { BEH.crew.forEach(c => { c.sev = 3; c.why = [mm.nuke ? '蒸發' : '與車體一同消失']; }); BEH.kill.K = BEH.kill.M = BEH.kill.F = true; }
     else if (mm.spare) { BEH.crew.forEach(c => { c.sev = 0; c.why = ['聽到「啪」的一聲']; }); BEH.kill.K = BEH.kill.M = BEH.kill.F = BEH.kill.X = false; }
     BEH.events = mm.ev.map(([t, text]) => ({ t, text }));
@@ -220,6 +233,16 @@
   $('v2d').addEventListener('click', () => setView('2d'));
   $('v3d').addEventListener('click', () => setView('3d'));
   $('camBtns').addEventListener('click', e => { const b = e.target.closest('[data-cam]'); if (b && r3d) { r3d.applyCam(b.dataset.cam); drawNow(); } });
+  // 測試環境
+  function renderEnv() {
+    const e = envDef(); $('envSel').innerHTML = (D.ENVS || []).map(x => `<option value="${x.id}"${x.id === e.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    const a = ammo(); const dv0 = a.v0 ? Math.round(E.envV0(a, env()) - a.v0) : 0;
+    $('envNote').textContent = `${e.ambT} °C · 空氣密度 ${Math.round(e.airRho * 100)}% · 初速 ${dv0 >= 0 ? '+' : ''}${dv0} m/s`;
+    $('envNote').title = e.desc || '';
+    document.documentElement.dataset.env = e.id;
+    window.__sceneBg = getComputedStyle(document.documentElement).getPropertyValue('--scene').trim() || '#0a0d10';
+  }
+  $('envSel').addEventListener('change', e => { S.envId = e.target.value; save(); renderEnv(); if (r3d) r3d.setEnv(envDef()); compute(); renderAll(); toast(envDef().name + '：' + envDef().desc); });
   // 實心／半透明分界（剖切位置）
   $('cutRange').value = S.opts.cut || 0;
   $('cutRange').addEventListener('input', e => { S.opts.cut = +e.target.value; if (r3d) r3d.setCut(S.opts.cut / 100); save(); drawNow(); });
@@ -239,7 +262,7 @@
     const list = D.AMMO.filter(x => inGroup(g, x));
     $('ammoSel').innerHTML = list.map(x => `<option value="${x.id}" ${x.id === S.ammoId ? 'selected' : ''}>${esc(x.name)}　${esc(x.nation)} ${x.year}</option>`).join('');
     $('ammoClassTag').textContent = (D.CLASS_LABEL[a.cls] || a.cls) + ' · ' + a.cls;
-    const v = E.velocityAt(a, S.range);
+    const v = E.velocityAt(a, S.range, env());
     const rows = [];
     const add = (k, v) => rows.push(`<dt>${k}</dt><dd>${v}</dd>`);
     add('火砲/載具', esc(a.gun));
@@ -1178,7 +1201,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
     const res = SC.res, seq = SC.seq || {};
     const tc = res.cls === 'CE' || res.cls === 'HESH' ? seq.tContact : 0;
     if (cross(tc)) { if (res.verdict === 'ricochet') A.ricochet(); else A.impact(res.cls !== 'CE'); }
-    const mm = SC.ammo.meme; if (mm && mm.flash && cross(tc)) { A.boom(1.5); const fl = $('memeFlash'); fl.style.setProperty('--fl', mm.flash); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go'); }
+    const mm = SC.ammo.meme; if (mm && mm.flash && cross(tc)) { if (res.meme && res.meme[0] === '擋') mm._dim = 0.25; else mm._dim = 1; A.boom(1.5); const fl = $('memeFlash'); fl.style.setProperty('--fl', mm.flash * mm._dim); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go'); }
     if (res.cls === 'CE' && cross(seq.tDet)) A.boom(Math.min(1, (SC.ammo.CD || 100) / 150) * 0.7);
     if (res.cls === 'CE' && cross(seq.tPre)) A.boom(0.15);
     if (res.cls === 'HESH' && cross(0)) A.boom(0.6);
@@ -1286,6 +1309,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
 
   /* ---------------- 啟動 ---------------- */
   function renderAll() {
+    renderEnv();
     renderAmmo(); renderArmor(); renderComp(); renderVeh(); renderScenarios();
     $('speedSel').value = String(S.speed); $('thermalBtn').setAttribute('aria-pressed', !!S.thermal); $('xrayBtn').setAttribute('aria-pressed', !!S.xray);
     r2d.thermal = !!S.thermal; if (r3d) r3d.thermal = !!S.thermal;

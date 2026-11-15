@@ -287,6 +287,11 @@ table.t tr.clickable:hover td { background: var(--panel-2); }
 .card > header h2 { margin: 0; font-size: 14px; letter-spacing: .12em; font-weight: 700; color: var(--ink-2); }
 .card > header .tag { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
 .card .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.env-ctl { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 6px; background: rgba(10,14,18,.74); border: 1px solid rgba(255,255,255,.18); border-radius: 5px; padding: 3px 8px; font-size: 12px; color: #c9d2d8; max-width: calc(100% - 20px); }
+.env-ctl select { width: auto; padding: 2px 6px; font-size: 12px; background: rgba(0,0,0,.35); }
+.env-ctl span { font-family: var(--f-mono); font-size: 11px; color: #9fb0bd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-env="desert"] { --scene: #2a2418; } html[data-env="arctic"] { --scene: #1d242b; } html[data-env="alpine"] { --scene: #1c2430; }
+html[data-env="night"] { --scene: #04060a; } html[data-env="urban"] { --scene: #1c1f23; }
 .meme-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 4; }
 .meme-flash.go { animation: memeFlash 2.2s ease-out; }
 @keyframes memeFlash { 0% { opacity: var(--fl, 1); } 12% { opacity: var(--fl, 1); } 100% { opacity: 0; } }
@@ -477,6 +482,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
       <canvas id="c3d" aria-label="三維場景" hidden></canvas>
       <div class="hud" id="hud" hidden><span class="phase" id="hudPhase">待命</span><span class="clock" id="hudClock">t = 0 µs</span></div>
       <div class="challenge-bar" id="chBar" hidden><b id="chBarTitle"></b><span id="chBarGoal"></span><button class="btn small" id="chBarExit">離開任務</button></div>
+      <div class="env-ctl"><label for="envSel">環境</label><select id="envSel" aria-label="測試環境"></select><span id="envNote"></span></div>
       <div class="vp-tools">
         <label class="cut-ctl" id="cutCtl" hidden title="拖曳調整實心與半透明的分界（雙擊回到中線）"><span>半透明</span><input type="range" id="cutRange" min="-100" max="100" step="1" value="0" aria-label="實心與半透明分界位置"><span>實心</span></label>
         <span id="camBtns" hidden style="display:contents"><button data-cam="impact">撞擊</button><button data-cam="section">剖面</button><button data-cam="oblique">斜視</button><button data-cam="inside">車內</button><button data-cam="chase">追彈</button></span>
@@ -612,25 +618,25 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 </div>
 <div class="tip" id="tip" hidden></div>
 
-<script src="lib/three/three.min.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/CopyShader.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/EffectComposer.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/RenderPass.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/ShaderPass.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/UnrealBloomPass.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/GammaCorrectionShader.js?v=mwhjmvpx"></script>
-<script src="lib/three/examples/RGBELoader.js?v=mwhjmvpx"></script>
-<script src="lib/mp4-muxer.min.js?v=mwhjmvpx"></script>
-<script src="data.js?v=mwhjmvpx"></script>
-<script src="projgeom.js?v=mwhjmvpx"></script>
-<script src="vehicles.js?v=mwhjmvpx"></script>
-<script src="engine.js?v=mwhjmvpx"></script>
-<script src="armor.js?v=mwhjmvpx"></script>
-<script src="audio.js?v=mwhjmvpx"></script>
-<script src="learn.js?v=mwhjmvpx"></script>
-<script src="render2d.js?v=mwhjmvpx"></script>
-<script src="render3d.js?v=mwhjmvpx"></script>
-<script src="app.js?v=mwhjmvpx"></script>
+<script src="lib/three/three.min.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/CopyShader.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/EffectComposer.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/RenderPass.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/ShaderPass.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/UnrealBloomPass.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/GammaCorrectionShader.js?v=mwhyq3qb"></script>
+<script src="lib/three/examples/RGBELoader.js?v=mwhyq3qb"></script>
+<script src="lib/mp4-muxer.min.js?v=mwhyq3qb"></script>
+<script src="data.js?v=mwhyq3qb"></script>
+<script src="projgeom.js?v=mwhyq3qb"></script>
+<script src="vehicles.js?v=mwhyq3qb"></script>
+<script src="engine.js?v=mwhyq3qb"></script>
+<script src="armor.js?v=mwhyq3qb"></script>
+<script src="audio.js?v=mwhyq3qb"></script>
+<script src="learn.js?v=mwhyq3qb"></script>
+<script src="render2d.js?v=mwhyq3qb"></script>
+<script src="render3d.js?v=mwhyq3qb"></script>
+<script src="app.js?v=mwhyq3qb"></script>
 
 </html>

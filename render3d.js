@@ -41,7 +41,7 @@
     this.scene.fog = new T.Fog(0x0a0d10, 12, 34);
     this.camera = new T.PerspectiveCamera(38, 1, 0.01, 150);
     this.proceduralEnv();
-    this.scene.add(new T.HemisphereLight(0xa8bfd4, 0x2a2118, 0.4));
+    this.hemi = new T.HemisphereLight(0xa8bfd4, 0x2a2118, 0.4); this.scene.add(this.hemi);
     const key = this.key = new T.DirectionalLight(0xfff0dc, 1.3);
     key.position.set(-3.5, 7, 5); key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02;
@@ -245,6 +245,7 @@
     const fl = this.radialTex('flame', [[0, 'rgba(255,236,170,1)'], [0.35, 'rgba(255,150,50,.8)'], [1, 'rgba(255,60,10,0)']]);
     for (let i = 0; i < 40; i++) { const s = new T.Sprite(new T.SpriteMaterial({ map: fl, blending: T.AdditiveBlending, depthWrite: false, transparent: true })); s.visible = false; this.world.add(s); this.moduleFire.push(s); }
     this.buildBehind();
+    this.buildSceneFx();
     this.shells = []; this.makeShockMat();
     // 空氣粒子（多邊形內）
     const b = hull.bounds; this.airBase = []; for (let i = 0; this.airBase.length < 1400 && i < 9000; i++) { const x = b.x0 + hash(i * 3 + 1) * (b.x1 - b.x0), y = b.y0 + hash(i * 3 + 2) * (b.y1 - b.y0); if (root.Hull.inside(hull, x, y)) this.airBase.push([x, y, (hash(i * 3 + 3) - 0.5) * hull.D]); }
@@ -432,13 +433,18 @@
     const sc = this.sc, res = sc.res, F = sc.field; if (!F || !F.ok || !this.plates) return;
     const depth = t > 0 ? root.craterDepthAt(res, Math.min(t, (sc.tPen1 || t) * 1.5)) : 0;
     const T = this.T;
+    // 侵徹體鼻端位置（接觸前為負值）與彈頭外形：孔只開在彈體表面已經掃過的地方
+    const head = this.head3 && this.head3.geo === sc.geo ? this.head3 : (this.head3 = Object.assign({ geo: sc.geo }, root.PG.head(sc.geo)));
+    const tipX = t > 0 ? depth : ((res.cls === 'KE' || res.cls === 'AP') && res.verdict !== 'ricochet' ? (res.impactV || 0) * t : -1e9);
+    const late = t >= (sc.tPen1 || 1e9) * 1.5; // 侵徹結束很久之後：貫穿孔視為完全打開
     this.plates.forEach(P => {
       const s = P.s, S = P.S, th = P.th;
-      const din = depth - s.p0; const started = din > 0 && res.verdict !== 'ricochet';
+      const tnA = Math.abs(Math.tan(th)); const R00 = S.rPhys || 0.02;
+      const din = tipX - s.p0; const started = tipX > s.p0 - 1.7 * R00 * tnA && res.verdict !== 'ricochet';
       const perf = S.tOut != null && t >= S.tOut;
       const Rf = started ? F.rLocal(S, s.p0 + 1e-5, perf) : 0;
       const Rb = perf ? F.rLocal(S, s.p1 - 1e-5, true) : 0;
-      const grow = started ? Math.min(1, din / Math.max(Rf * 0.6, 1e-4)) : 0;
+      const grow = started ? clamp(din / Math.max(Rf * 0.6, 1e-4), 0, 1) : 0;
       const tn = P.tN; const remain = Math.max(0, (s.p1 - depth) * Math.cos(th));
       // 背面隆起：剩餘厚度小於約 2 倍彈坑半徑時開始（金屬延性變形）
       const R0 = S.rPhys;
@@ -448,7 +454,7 @@
       // 貫穿後：薄板（t < 4R）花瓣狀撕裂；厚板為塞塊/剝落，出口擴大
       const petal = perf && P.metal && tn < 4 * R0; const nPet = tn < 1.5 * R0 ? 4 : tn < 3 * R0 ? 5 : 6;
       const Rp = Rb + Math.min(1.5 * tn, 1.3 * Rb);
-      const key = [Rf.toFixed(4), Rb.toFixed(4), bulgeH.toFixed(4), grow.toFixed(2), Math.round((F.maxT || 0) / 40), Math.round(t * 20)].join('|');
+      const key = [Math.round(tipX * 4000), Rf.toFixed(4), Rb.toFixed(4), bulgeH.toFixed(4), grow.toFixed(2), Math.round((F.maxT || 0) / 40), Math.round(t * 20)].join('|');
       P.faces.forEach(Fc => {
         if (Fc.key === key) return; Fc.key = key;
         const front = Fc.sgn < 0; const pos = Fc.pos, base = Fc.base, rho = Fc.rho, phi = Fc.phi; const n = rho.length;
@@ -456,13 +462,18 @@
         const hide = new Uint8Array(n), crack = new Uint8Array(n); const cth = Math.max(Math.cos(th), 0.05);
         for (let k = 0; k < n; k++) {
           let w = 0; const r = rho[k];
-          if (front && started && P.metal && r > Rf && r < 1.9 * Rf) w = -0.35 * Rf * (1 - (r - Rf) / (0.9 * Rf)) * grow;           // 入口唇（向外）
-          if (front && started && r <= Rf) hide[k] = 1;
-          if (!front && perf && r <= Rb) hide[k] = 1;
+          // 這個頂點沿彈道的位置 xv；彈體表面在半徑 r 處落後鼻端 lag
+          const xv = (front ? s.p0 : s.p1) + r * Math.cos(phi[k]) * Math.tan(th);
+          const hit = late || tipX >= xv + head.lag(R > 0 ? r / R : 1);
+          const near = late || tipX >= xv - 0.2 * R;
+          if (front && started && P.metal && r > Rf && r < 1.9 * Rf) w = near ? -0.35 * Rf * (1 - (r - Rf) / (0.9 * Rf)) * grow : 0; // 入口唇（向外）
+          if (front && started && r <= Rf && hit) hide[k] = 1;
+          if (!front && perf && r <= Rb && hit) hide[k] = 1;
           if (!front) {
             if (bulgeH > 0 && r < bulgeR) { const u = r / bulgeR; w = bulgeH * (1 - u * u) * (1 - u * u); }
             if (perf) {
               if (r <= Rb) { /* 彈孔 */ }
+              else if (!near) { /* 彈體還沒到這一側 */ }
               else if (petal && r < Rp) {
                 const u = (Rp - r) / (Rp - Rb); w = (r - Rb) * 0.15 + u * u * (Rp - Rb) * 0.95;                               // 花瓣外翻
                 const cr = Math.abs(Math.cos(nPet * phi[k] / 2)); if (cr < 0.11 + 0.1 * u) crack[k] = 1;                          // 撕裂縫
@@ -827,7 +838,7 @@
     (this.slabs || []).forEach(sl => { (sl.mats || []).forEach(m => { m.transparent = on || !!m.__ghost || !!m.__glass; m.opacity = on ? 0.12 : (m.__ghost ? 0.18 : (m.__op || 1)); m.depthWrite = !(on || m.__ghost); m.needsUpdate = true; }); if (sl.mesh) (Array.isArray(sl.mesh.material) ? sl.mesh.material : [sl.mesh.material]).forEach(m => { m.transparent = on || !!m.__glass; m.opacity = on ? 0.25 : (m.__op || 1); m.depthWrite = !on; m.needsUpdate = true; }); });
     (this.mods || []).forEach(M => { M.edges.visible = on; M.xb.visible = on; M.g.children.forEach(c => { if (c !== M.edges && c !== M.xb) c.visible = !on; }); });
     (this.crew || []).forEach(g => { g.userData.mats.forEach(m => { m.transparent = on; m.opacity = on ? 0.55 : 1; m.needsUpdate = true; }); });
-    this.grid.visible = !on;
+    this.grid.visible = !on && this.gridOn !== false;
   };
 
   /* ---------- 每幀更新 ---------- */
@@ -858,6 +869,7 @@
     this.updateFlash(t, ph);
     this.updateModules(t, behind);
     this.updateBehind(t, behind);
+    this.updateEnv(t);
     this.updateCam();
     if (this.composer && this.useBloom !== false) { this.bloom.strength = this.xray ? 0.35 : 0.7; this.composer.render(); } else this.renderer.render(this.scene, this.camera);
   };
@@ -913,7 +925,13 @@
       if (res.verdict === 'ricochet' && t > 0) {
         const sb = res.subs[res.ricochet.layer]; const th = sb.thS != null ? sb.thS : sb.theta; const v = res.impactV * 0.6; const ang = (Math.PI / 2 - Math.abs(th)) * 2 * clamp(t / 2e-4, 0, 1) * Math.sign(th || 1);
         g.position.set(sb.p0 + Math.cos(ang) * v * t, Math.sin(ang) * v * t, 0); g.rotation.z = ang; this.pNose.visible = t < 1.5e-5; clipOn = true;
-      } else { g.position.set(s.tip, 0, 0); this.pNose.visible = t < 1.5e-5; clipOn = t <= 0; if (t <= 0 && this.mach) this.mach.visible = true; }
+      } else {
+        // 引擎的 tip 是侵徹體鼻端；風帽尖端在前方 off 處，接觸板面後被壓扁（顯示體積＝碰撞體積）
+        const off = root.PG.head(geo).off, Lw = geo.noseLen || off; g.position.set(s.tip + off, 0, 0);
+        if (off > 0) { const c = clamp(s.tip + off - (f ? f.p0 : 0), 0, off * 0.97); this.pNose.visible = t <= 0; this.pNose.scale.x = (Lw - c) / Lw; this.pNose.position.x = -c; }
+        else this.pNose.visible = t < 1.5e-5;
+        clipOn = t <= 0; if (t <= 0 && this.mach) this.mach.visible = true;
+      }
       if (behind && res.verdict === 'perforated') g.visible = false;
     } else if (res.cls === 'HESH') {
       let i = 0; while (i < res.subs.length && res.subs[i].kind === 'gap') i++;
@@ -1145,5 +1163,135 @@
     } else this.air.geometry.setDrawRange(0, 0);
   };
 
+  /* ===================== 測試環境與場景影響 ===================== */
+  /** 切換測試環境：天空、霧、地面、光線，以及雪、星空、岩石、街道等場景物件 */
+  R3D.prototype.setEnv = function (E) {
+    if (!this.ok || !E || !E.look) return;
+    const T = this.T, L = E.look; this.env = E;
+    const lin = c => new T.Color(c).convertSRGBToLinear();
+    this.bg = lin(L.bg); this.scene.background = this.bg.clone();
+    this.scene.fog.color = lin(L.fog[0]); this.scene.fog.near = L.fog[1]; this.scene.fog.far = L.fog[2];
+    this.ground.material.color = lin(L.ground); this.ground.material.roughness = E.id === 'arctic' ? 0.7 : 0.95;
+    this.grid.visible = !!L.grid; this.gridOn = !!L.grid;
+    if (this.hemi) { this.hemi.color = lin(L.hemi[0]); this.hemi.groundColor = lin(L.hemi[1]); this.hemi.intensity = L.hemi[2]; }
+    this.key.color = lin(L.key[0]); this.key.intensity = L.key[1]; this.renderer.toneMappingExposure = L.exp;
+    // 場景物件
+    if (this.envG) { this.envG.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); this.scene.remove(this.envG); }
+    const g = this.envG = new T.Group(); this.scene.add(g); this.envFx = null;
+    const rnd = i => { const x = Math.sin(i * 91.7 + 13.1) * 43758.5453; return x - Math.floor(x); };
+    if (E.fx === 'snow') {
+      const n = 1600, geo = new T.BufferGeometry(), p = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { p[i * 3] = -10 + 26 * rnd(i); p[i * 3 + 1] = 9 * rnd(i + 7); p[i * 3 + 2] = -10 + 20 * rnd(i + 3); }
+      geo.setAttribute('position', new T.BufferAttribute(p, 3));
+      const pts = new T.Points(geo, new T.PointsMaterial({ color: 0xffffff, size: 0.045, transparent: true, opacity: 0.85, depthWrite: false }));
+      g.add(pts); this.envFx = { type: 'snow', pts, base: p.slice() };
+    }
+    if (E.fx === 'stars') {
+      const n = 900, geo = new T.BufferGeometry(), p = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { const th = 6.2832 * rnd(i), ph = Math.acos(0.05 + 0.95 * rnd(i + 5)); p[i * 3] = 60 * Math.sin(ph) * Math.cos(th); p[i * 3 + 1] = 60 * Math.cos(ph); p[i * 3 + 2] = 60 * Math.sin(ph) * Math.sin(th); }
+      geo.setAttribute('position', new T.BufferAttribute(p, 3));
+      const pts = new T.Points(geo, new T.PointsMaterial({ color: 0xdfe7ff, size: 0.12, fog: false, transparent: true, opacity: 0.8, depthWrite: false }));
+      g.add(pts);
+      const moon = new T.Mesh(new T.SphereGeometry(1.4, 24, 16), new T.MeshBasicMaterial({ color: 0xe8edf8, fog: false })); moon.position.set(-30, 26, -38); g.add(moon);
+    }
+    if (E.fx === 'rocks') {
+      const m = new T.MeshStandardMaterial({ color: 0x4a473f, roughness: 0.95, metalness: 0.05 });
+      for (let i = 0; i < 46; i++) {
+        const side = rnd(i + 2) < 0.5 ? -1 : 1, s = 0.2 + 1.1 * Math.pow(rnd(i + 4), 2);
+        const r = new T.Mesh(new T.DodecahedronGeometry(s, 0), m); r.position.set(-14 + 34 * rnd(i), s * 0.4, side * (3 + 14 * rnd(i + 9))); r.rotation.set(rnd(i + 1) * 3, rnd(i + 3) * 3, 0); r.castShadow = r.receiveShadow = true; g.add(r);
+      }
+      const mtn = new T.MeshStandardMaterial({ color: 0x7f8a96, roughness: 1, flatShading: true });
+      for (let i = 0; i < 7; i++) { const c = new T.Mesh(new T.ConeGeometry(9 + 8 * rnd(i + 30), 10 + 9 * rnd(i + 31), 6), mtn); c.position.set(-40 + 80 * i / 6, 4, -48 - 10 * rnd(i + 32)); g.add(c); }
+    }
+    if (E.fx === 'city') {
+      const cols = [0x6b645b, 0x55595d, 0x766c5e, 0x4a4d50, 0x62594f];
+      this.buildings = [];
+      for (let side = -1; side <= 1; side += 2) for (let i = 0; i < 8; i++) {
+        const w = 4 + 3 * rnd(i * 2 + side), h = 5 + 11 * rnd(i * 3 + side), d = 5 + 3 * rnd(i * 5 + side);
+        const m = new T.MeshStandardMaterial({ color: cols[(i + side + 2) % cols.length], roughness: 0.85, metalness: 0.05 });
+        const b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.position.set(-16 + i * 5.4, h / 2, side * (8 + d / 2)); b.castShadow = b.receiveShadow = true; g.add(b);
+        // 窗戶
+        const wm = new T.MeshStandardMaterial({ color: 0x1d2a35, roughness: 0.15, metalness: 0.6, emissive: 0x0b1118 });
+        for (let fy = 1.6; fy < h - 0.8; fy += 2.6) for (let fx = -w / 2 + 0.9; fx < w / 2 - 0.6; fx += 1.5) {
+          const win = new T.Mesh(new T.PlaneGeometry(0.8, 1.1), wm); win.position.set(b.position.x + fx, fy, side * 8 - side * 0.01); win.rotation.y = side > 0 ? Math.PI : 0; g.add(win);
+        }
+        this.buildings.push(b);
+      }
+      const walk = new T.MeshStandardMaterial({ color: 0x5a5c5e, roughness: 0.9 });
+      [-1, 1].forEach(sd => { const sw = new T.Mesh(new T.BoxGeometry(60, 0.18, 2), walk); sw.position.set(4, 0.09, sd * 7); sw.receiveShadow = true; g.add(sw); });
+    }
+    this.fixColors(g);
+    this.dirty = true;
+  };
+  /** 每次建立場景時：命中揚塵、地面焦痕、彈坑 */
+  R3D.prototype.buildSceneFx = function () {
+    const T = this.T, E = this.env || {};
+    this.dustN = 500;
+    this.dust = this.makePoints(this.dustN, 0.07, false, this.world); this.dust.material.transparent = true; this.dust.material.opacity = 0.85; this.dust.material.depthWrite = false;
+    const scorchTex = this.radialTex('scorch', [[0, 'rgba(8,6,4,.95)'], [0.55, 'rgba(20,14,8,.7)'], [1, 'rgba(20,14,8,0)']]);
+    this.scorch = new T.Mesh(new T.CircleGeometry(1, 40), new T.MeshBasicMaterial({ map: scorchTex, transparent: true, depthWrite: false, opacity: 0 }));
+    this.scorch.rotation.x = -Math.PI / 2; this.scorch.visible = false; this.scorch.renderOrder = 1; this.world.add(this.scorch);
+    const craterTex = this.radialTex('crater', [[0, 'rgba(10,8,6,1)'], [0.62, 'rgba(36,28,20,.95)'], [0.78, 'rgba(110,94,74,.85)'], [1, 'rgba(110,94,74,0)']]);
+    this.crater = new T.Mesh(new T.CircleGeometry(1, 64), new T.MeshBasicMaterial({ map: craterTex, transparent: true, depthWrite: false, opacity: 0 }));
+    this.crater.rotation.x = -Math.PI / 2; this.crater.visible = false; this.crater.renderOrder = 1; this.world.add(this.crater);
+    void E;
+  };
+  /** 依模擬時間更新環境效果與場景影響 */
+  R3D.prototype.updateEnv = function (t) {
+    const T = this.T, sc = this.sc, E = this.env || {}, beh = sc.beh || {}, res = sc.res, a = sc.ammo || {};
+    const gy = this.ground.position.y; if (this.envG) this.envG.position.y = gy;
+    // 下雪（真實時間）
+    if (this.envFx && this.envFx.type === 'snow') {
+      const now = performance.now() / 1000, p = this.envFx.pts.geometry.attributes.position, b = this.envFx.base;
+      for (let i = 0; i < p.count; i++) { const y = ((b[i * 3 + 1] - now * (0.6 + 0.3 * ((i * 7) % 5) / 5)) % 9 + 9) % 9; p.setXYZ(i, b[i * 3] + Math.sin(now * 0.7 + i) * 0.15, y, b[i * 3 + 2]); }
+      p.needsUpdate = true; this.dirty = true;
+    }
+    if (!this.dust) return;
+    const xr = this.xray; const hull = sc.hull, bx = hull ? (hull.bounds.x0 + hull.bounds.x1) / 2 : 1;
+    // 命中點（世界座標）
+    let i0 = 0; while (i0 < res.subs.length && res.subs[i0].kind !== 'mat') i0++;
+    const p0 = res.subs[i0] ? res.subs[i0].p0 : 0;
+    this.shotIn.updateMatrixWorld(true); const hit = new T.Vector3(p0, 0, 0).applyMatrix4(this.shotIn.matrixWorld);
+    // 事件：大爆炸（殉爆、離譜彈種）、起火
+    const mm = a.meme, held = res.meme && res.meme[0] === '擋';
+    const big = mm && mm.kill && !held;
+    const tBoom = big ? 0 : (beh.cookoff ? beh.cookoff.tBoom : null);
+    const fireT = beh.cookoff ? beh.cookoff.t : (beh.fuelFire ? beh.fuelFire.t : null);
+    const craterR = big ? ({ J_DORA: 5, J_STURM: 3, J_ROD: 4.5, J_CROCKETT: 14, J_ANNIE: 45, J_TSAR: 70 })[a.id] || 3 : 0;
+    // 揚塵：撞擊時從命中點向前噴；大爆炸時從車底向四周掀起
+    const P = this.dust.geometry.attributes.position, C = this.dust.geometry.attributes.color; let n = 0;
+    const dc = new T.Color(E.dust != null ? E.dust : 0x6b6f72);
+    const burst = (t0, ox, oy, oz, N, spd, up, seed, life) => {
+      const dt = t - t0; if (dt <= 0 || dt > life || xr) return;
+      for (let i = 0; i < N && n < this.dustN; i++) {
+        const r1 = hash(seed + i * 3.1), r2 = hash(seed + i * 5.7), r3 = hash(seed + i * 9.3);
+        const ang = r1 * 6.2832, sp = spd * (0.3 + 0.7 * r2), vy = up * (0.4 + 0.8 * r3);
+        const x = ox + Math.cos(ang) * sp * dt, z = oz + Math.sin(ang) * sp * dt, y = Math.max(gy + 0.02, oy + vy * dt - 4.9 * dt * dt * 0.35);
+        const fade = 1 - dt / life; P.setXYZ(n, x, y, z); C.setXYZ(n, dc.r * fade, dc.g * fade, dc.b * fade); n++;
+      }
+    };
+    if (res.verdict !== 'ricochet' && a.id !== 'J_POTATO') burst(0, hit.x - 0.1, hit.y, hit.z, 140, 3.2 * Math.min(2, Math.cbrt((res.impactV || 500) / 900)), 2.5, 11, 3);
+    if (hit.y - gy < 0.8) burst(0, hit.x, gy + 0.05, hit.z, 120, 2.5, 1.5, 23, 3.5); // 命中點貼近地面：地面也被打起來
+    if (tBoom != null) burst(tBoom, bx, gy + 0.1, 0, 240, big ? 9 + craterR * 0.6 : 5, big ? 7 : 4, 37, big ? 8 : 5);
+    P.needsUpdate = true; C.needsUpdate = true; this.dust.geometry.setDrawRange(0, n);
+    // 焦痕：起火或殉爆後地面燒黑
+    const sT = tBoom != null ? tBoom : fireT;
+    if (sT != null && t > sT && !xr && !big) { const u = clamp((t - sT) / 1.5, 0, 1); this.scorch.visible = true; this.scorch.position.set(bx, gy + 0.012, 0); const R = (tBoom != null ? 3.6 : 2.4) * (0.4 + 0.6 * u); this.scorch.scale.set(R, R, 1); this.scorch.material.opacity = 0.85 * u; }
+    else this.scorch.visible = false;
+    // 彈坑：離譜彈種把地面也一起挖掉
+    if (big && t > 0 && !xr) { const u = clamp(t / 0.6, 0, 1); this.crater.visible = true; this.crater.position.set(bx, gy + 0.015, 0); const R = craterR * (0.3 + 0.7 * u); this.crater.scale.set(R, R, 1); this.crater.material.opacity = u; }
+    else this.crater.visible = false;
+    // 核彈：地面燒成焦黑、天空泛橘，城鎮建築被吹倒
+    const nuke = big && mm.nuke && t > 0;
+    if (this.envBase == null && E.look) this.envBase = true;
+    if (E.look) {
+      const L = E.look; const k = nuke ? clamp(t / 0.3, 0, 1) : 0;
+      const lin = c => new T.Color(c).convertSRGBToLinear();
+      const bg = lin(L.bg).lerp(lin(0xff9a4a), 0.55 * k), gr = lin(L.ground).lerp(lin(0x120c08), 0.9 * k);
+      if (!this.xray) this.scene.background.copy(bg); this.ground.material.color.copy(gr); this.scene.fog.color.copy(lin(L.fog[0]).lerp(lin(0xd0702c), 0.6 * k));
+      (this.buildings || []).forEach((b, i) => { const s = big && t > 0 && (mm.nuke || craterR >= 4.5) ? clamp(t / (0.4 + 0.1 * (i % 5)), 0, 1) : 0; b.scale.y = Math.max(0.08, 1 - 0.92 * s); b.position.y = b.geometry.parameters.height * b.scale.y / 2; });
+      if (this.envG) this.envG.children.forEach(o => { if (o.geometry && o.geometry.type === 'PlaneGeometry') o.visible = !(big && t > 0.05 && (mm.nuke || craterR >= 4.5)); });
+    }
+  };
   root.Render3D = R3D;
 })(window);

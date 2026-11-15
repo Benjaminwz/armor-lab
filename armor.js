@@ -12,7 +12,7 @@
   'use strict';
   const E = root.Engine;
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-  const T0 = 20, SIGMA = 5.67e-8;
+  let T0 = 20; const SIGMA = 5.67e-8; // T0：環境溫度，每個場景建立時依測試環境設定
   function hash(i) { let x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
   function hex(c) { const n = parseInt(c.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
 
@@ -61,6 +61,7 @@
      材料場
      ===================================================================== */
   function ArmorField(sc) {
+    T0 = sc.env && sc.env.ambT != null ? sc.env.ambT : 20;
     this.sc = sc; const res = sc.res, a = sc.ammo;
     const subs = res.subs.map((s, i) => ({ s, i })).filter(o => o.s.kind === 'mat' && !o.s.era);
     this.ok = subs.length > 0; if (!this.ok) return;
@@ -201,7 +202,9 @@
     if (d <= this.lastDepth + 1e-7) return;
     const h = this.h, cols = this.cols, rows = this.rows;
     const rMax = Math.max(this.r0, ...this.subInfo.map(S => S.rPhys || 0)) * 2.6;
-    const c0 = Math.max(0, Math.floor((this.lastDepth - rMax - this.x0) / h)), c1 = Math.min(cols - 1, Math.ceil((d + rMax - this.x0) / h));
+    // 彈坑前緣嚴格等於彈頭外形：材料只在被彈體表面掃過時才被移除
+    const head = this.head || (this.head = root.PG && root.PG.head ? root.PG.head(this.sc.geo) : { lag: () => 0, lagMax: 0 });
+    const c0 = Math.max(0, Math.floor((this.lastDepth - rMax - head.lagMax - this.x0) / h)), c1 = Math.min(cols - 1, Math.ceil((d + rMax - this.x0) / h));
     const j0 = Math.max(0, Math.floor((-rMax - this.y0) / h)), j1 = Math.min(rows - 1, Math.ceil((rMax - this.y0) / h));
     const res = this.sc.res;
     const vPen = res.cls === 'CE' ? 3000 : Math.max(res.impactV || 500, 200);
@@ -214,7 +217,7 @@
         const exitOpen = S.tOut != null && t >= S.tOut;
         const r = this.rLocal(S, u, exitOpen);
         const ay = Math.abs(y);
-        if (ay <= r && x <= d + 0.5 * Math.sqrt(Math.max(r * r - y * y, 0))) {
+        if (ay <= r && x <= d - head.lag(ay / r)) {
           this.st[k] = 2; this.T[k] = this.wallT(S) * 1.15; this.removedCount++;
           // 反噴：自該層入口沿彈坑往回
           if (hash(k * 1.37 + 3) < 0.22) {
@@ -222,7 +225,7 @@
             const ang = Math.PI + (hash(k + 5) - 0.5) * 1.3;
             this.spawn(t, ent - 0.002, clamp(y * 1.4, -r * 1.6, r * 1.6), Math.cos(ang) * sp, Math.sin(ang) * sp, S.mi, this.wallT(S), 'ejecta', k);
           }
-        } else if (x <= d + r) {
+        } else if (x <= d) {
           // 塑性區/彈坑壁
           const w = this.r0 * (S.metal ? 1.2 : 0.7);
           if (ay > r && ay < r + 3 * w && !(this.flag[k] & 1)) {
