@@ -79,3 +79,7 @@ npm run dist       # 產生 Windows 安裝檔與免安裝版到 dist/
 - [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) 5.2.2：MIT 授權。
 - 彈藥與裝甲數據為公開資料的工程估計；示意預設不代表任何實車的機密結構。
   本程式為半經驗模擬，不可作為實際防護設計依據。
+
+## 授權
+
+MIT License（見 LICENSE）。第三方元件沿用各自授權：three.js（MIT）、mp4-muxer（MIT）、Poly Haven 貼圖與 HDRI（CC0）。
