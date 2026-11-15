@@ -69,7 +69,7 @@
   r2d.onCrewMove = (i, x, y) => onCrewMove(i, x, y, S.crew[i].z || 0);
   r2d.onCrewDrop = i => onCrewDrop(i);
   window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow() }; // 偵錯用
-  r2d.onHitMove = u => { S.hitU = +u.toFixed(3); clearTimeout(cT); cT = setTimeout(compute, 40); };
+  r2d.onHitMove = u => { if (!canEdit('hitY')) return; S.hitU = +u.toFixed(3); clearTimeout(cT); cT = setTimeout(compute, 40); };
   r2d.onHitDrop = () => save();
 
   let RES = null, BEH = null, SC = null, HULL = null;
@@ -109,6 +109,7 @@
   }
   let dragT = 0;
   function onCrewMove(i, x, y, z) {
+    if (!canEdit('crew')) return;
     const c = S.crew[i]; const nc = Object.assign({}, c, { x: +x.toFixed(3), y: +y.toFixed(3), z: +(+z).toFixed(3) }); if (HULL && !window.Hull.crewOK(HULL, nc)) return; Object.assign(c, nc);
     if (r3d && S.view === '3d') r3d.moveCrew(i, c);
     cancelAnimationFrame(dragT); dragT = requestAnimationFrame(() => { computeBehindOnly(); renderCrewList(); });
@@ -185,6 +186,7 @@
     if ($('autoRec').checked && !REC.active) { REC.start(true); }
     r2d.userCam = null; $('camAuto').hidden = true; if (r3d) r3d.applyCam('auto');
     logShot(); playFireSound(); play(true);
+    if (S.challenge) { S.chShots = (S.chShots || 0) + 1; save(); checkChallenge(true); }
   });
   $('replayBtn').addEventListener('click', () => play(true));
   $('speedSel').addEventListener('change', e => { S.speed = +e.target.value; save(); });
@@ -658,56 +660,91 @@
 
   /* ---------------- 任務 ---------------- */
   const sameStack = id => JSON.stringify((D.PRESETS.find(p => p.id === id) || {}).layers) === JSON.stringify(S.stack);
+  /** 原預設裝甲層仍完整保留在最前面（只能「加」層） */
+  const keepsPreset = id => { const L = (D.PRESETS.find(p => p.id === id) || {}).layers || []; return S.stack.length >= L.length && JSON.stringify(S.stack.slice(0, L.length)) === JSON.stringify(L); };
+  /*
+    任務：每項只開放 edit 列出的設定，其餘控制項在任務中隱藏（無法修改）。
+    edit 鍵：ammo 彈種、range 射距、standoff 炸高、alpha 傾角、beta 側轉、descent 俯角、layers 裝甲層、
+             hitY 命中點、hatch 艙蓋與洩壓、crew 乘員位置、veh 車體
+  */
   const CH = [
-    { id: 't34', title: 'T-34 首上之謎', goal: '7.5 cm KwK 40 Pzgr.39 對 T-34 首上（45 mm @60°）：在 500 m 以上距離擊穿。不可改裝甲與 α，可調射擊俯角（自高處射擊）與距離。',
+    { id: 't34', title: 'T-34 首上之謎', edit: ['range', 'descent'], goal: '用 7.5 cm Pzgr.39 在 500 m 以上擊穿 T-34 首上，距離越遠越好。',
       setup: () => ({ ammoId: 'KWK40', preset: 't34', range: 800 }), check: r => ({ pass: r.verdict === 'perforated' && S.range >= 500 && S.ammoId === 'KWK40' && sameStack('t34') && Math.abs(S.alpha - 60) < 0.01, score: S.range, fmt: v => `${v} m`, higher: true }) },
-    { id: 'ric', title: '跳彈邊緣', goal: '3BM42 於 2000 m 射擊 150 mm RHA：找出仍能完全貫穿的最大傾斜角，達到 70° 以上即過關。',
+    { id: 'ric', title: '跳彈邊緣', edit: ['alpha'], goal: '3BM42 射擊 150 mm 鋼板：找出仍能貫穿的最大傾角，70° 以上過關。',
       setup: () => ({ ammoId: '3BM42', stack: [{ kind: 'plate', mat: 'RHA', t: 150 }], range: 2000, alpha: 60, veh: 'box' }), check: r => ({ pass: r.verdict === 'perforated' && S.ammoId === '3BM42' && S.range >= 2000 && S.stack.length === 1 && S.stack[0].mat === 'RHA' && S.stack[0].t === 150 && S.beta === 0 && S.descent === 0 && S.alpha >= 70, score: S.alpha, fmt: v => `${v.toFixed(1)}°`, higher: true }) },
-    { id: 'rpg', title: '輕量化對抗 RPG', goal: '擋下 PG-7VL（格柵一律視為被穿過）。迎面面密度 ≤ 600 kg/m²，越輕越好。',
+    { id: 'rpg', title: '輕量化對抗 RPG', edit: ['layers'], goal: '設計裝甲擋下 PG-7VL（格柵無效），面密度 ≤ 600 kg/m²，越輕越好。',
       setup: () => ({ ammoId: 'PG7VL', stack: [{ kind: 'plate', mat: 'RHA', t: 30 }], alpha: 0, slatMode: 'pass', veh: 'apc' }), check: r => ({ pass: r.verdict !== 'perforated' && r.verdict !== 'slat' && S.ammoId === 'PG7VL' && projAreal(r) <= 600 && S.slatMode === 'pass' && S.standoff == null, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'tandem', title: '串聯彈頭', goal: '擋下 PG-7VR 串聯彈頭，迎面面密度 ≤ 1000 kg/m²。前驅裝藥會先引爆第一組 ERA。',
+    { id: 'tandem', title: '串聯彈頭', edit: ['layers'], goal: '擋下 PG-7VR 串聯彈頭（前驅裝藥會先引爆第一組 ERA），面密度 ≤ 1000 kg/m²。',
       setup: () => ({ ammoId: 'PG7VR', stack: [{ kind: 'era', model: 'K1' }, { kind: 'plate', mat: 'RHA', t: 60 }], alpha: 0, slatMode: 'pass', veh: 'mbt_east' }), check: r => ({ pass: r.verdict === 'stopped' && S.ammoId === 'PG7VR' && projAreal(r) <= 1000 && S.standoff == null, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'silver', title: '擋住銀彈', goal: '在 2000 m 擋下 M829A1，迎面面密度 ≤ 2600 kg/m²（同等 RHA 約需 4800）。可用斜角、陶瓷、ERA。',
+    { id: 'silver', title: '擋住銀彈', edit: ['layers', 'alpha'], goal: '擋下 2000 m 的 M829A1，面密度 ≤ 2600 kg/m²（純鋼板約需 4800）。',
       setup: () => ({ ammoId: 'M829A1', preset: 't64', range: 2000 }), check: r => ({ pass: r.verdict !== 'perforated' && S.ammoId === 'M829A1' && S.range >= 2000 && projAreal(r) <= 2600 && S.beta === 0 && S.descent === 0, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'aphe', title: '高爆穿甲彈入艙', goal: '122 mm BR-471 於 500 m 擊穿雪曼首上，彈內裝藥在艙內爆開。不改裝甲，只調整乘員位置（至少 3 人、可開艙蓋），讓至少 2 人僅輕傷或無傷。',
+    { id: 'aphe', title: '高爆穿甲彈入艙', edit: ['crew', 'hatch'], goal: 'BR-471 會擊穿雪曼並在艙內爆開。安排乘員位置與艙蓋，讓至少 2 人僅輕傷或無傷。',
       setup: () => ({ ammoId: 'BR471', preset: 'sherman', range: 500 }), check: (r, b) => { const ok = b.crew.filter(c => c.sev <= 1).length; return { pass: r.verdict === 'perforated' && S.ammoId === 'BR471' && sameStack('sherman') && S.crew.length >= 3 && ok >= 2, score: ok, fmt: v => `${v} 人倖存`, higher: true }; } },
-    { id: 'liner', title: '防破片內襯', goal: '30 mm APFSDS 於 1000 m 射擊 M113 首上。可加層但增加的迎面面密度 ≤ 120 kg/m²，且無人重傷。',
-      setup: () => ({ ammoId: 'APFSDS30', preset: 'm113', range: 1000 }), check: (r, b) => { const base = 38 * 2660 / Math.cos(45 * DEG); return { pass: S.ammoId === 'APFSDS30' && S.range >= 1000 && projAreal(r) - base <= 120 && S.crew.length >= 3 && b.crew.every(c => c.sev < 2), score: projAreal(r) - base, fmt: v => `+${Math.round(v)} kg/m²`, higher: false }; } },
-    { id: 'hesh', title: '碎甲彈的剋星', goal: '105 mm L35 HESH 射擊 100 mm 鋼板會產生背面剝落。重新設計裝甲（迎面面密度 ≤ 950 kg/m²），讓剝落塊無法進入艙內。',
+    { id: 'liner', title: '防破片內襯', edit: ['layers'], goal: '30 mm 穿甲彈會擊穿 M113。在原裝甲後方加層（增加 ≤ 120 kg/m²），讓無人重傷。',
+      setup: () => ({ ammoId: 'APFSDS30', preset: 'm113', range: 1000 }), check: (r, b) => { const base = 38 * 2660 / Math.cos(45 * DEG); return { pass: keepsPreset('m113') && S.ammoId === 'APFSDS30' && S.range >= 1000 && projAreal(r) - base <= 120 && S.crew.length >= 3 && b.crew.every(c => c.sev < 2), score: projAreal(r) - base, fmt: v => `+${Math.round(v)} kg/m²`, higher: false }; } },
+    { id: 'hesh', title: '碎甲彈的剋星', edit: ['layers', 'alpha'], goal: '碎甲彈會讓 100 mm 鋼板背面剝落。重新設計裝甲（≤ 950 kg/m²）擋住剝落塊。',
       setup: () => ({ ammoId: 'L35', preset: 'rha100', range: 500 }), check: r => ({ pass: S.ammoId === 'L35' && r.verdict !== 'scab' && projAreal(r) <= 950, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'nocook', title: '別讓轉盤殉爆', goal: 'M829A1 於 2000 m 命中 T-72A 首上。不改彈種與距離，只能改變命中點與射擊俯角：讓車輛被擊穿但不起火（無 K-KILL）。',
+    { id: 'nocook', title: '別讓轉盤殉爆', edit: ['hitY', 'descent'], goal: 'M829A1 擊穿 T-72A：選擇命中點與俯角，讓它被擊穿卻不殉爆（無 K-KILL）。',
       setup: () => ({ ammoId: 'M829A1', preset: 't72a', range: 2000 }), check: (r, b) => ({ pass: S.ammoId === 'M829A1' && S.range >= 2000 && sameStack('t72a') && r.verdict === 'perforated' && !(b.kill && b.kill.K), score: b.crew.filter(c => c.sev <= 1).length, fmt: v => `${v} 人輕傷以下`, higher: true }) },
-    { id: 'mkill', title: '精準機動殺傷', goal: 'RPG-7（PG-7VL）命中步兵戰車首上：造成 M-KILL，但後艙載員全部只受輕傷或無傷。可調命中點與俯角。',
+    { id: 'mkill', title: '精準機動殺傷', edit: ['hitY', 'descent'], goal: 'RPG-7 命中步兵戰車：造成 M-KILL，但後艙載員全部只受輕傷或無傷。',
       setup: () => ({ ammoId: 'PG7VL', preset: 'bmp1', range: 0 }), check: (r, b) => { const troops = S.crew.map((c, i) => [c, b.crew[i]]).filter(([c]) => c.role === 'troop'); return { pass: S.ammoId === 'PG7VL' && sameStack('bmp1') && b.kill && b.kill.M && troops.length >= 2 && troops.every(([, e]) => e && e.sev <= 1), score: troops.filter(([, e]) => e && e.sev === 0).length, fmt: v => `${v} 名載員無傷`, higher: true }; } }
   ];
+  /** 任務中可否修改某項設定（非任務時一律可以） */
+  function canEdit(k) { const ch = CH.find(c => c.id === S.challenge); return !ch || ch.edit.includes(k); }
+  // 每個 edit 鍵對應的控制項（任務中不可改者隱藏）
+  const EDIT_UI = {
+    ammo: () => [$('ammoGroups'), $('ammoSel').closest('.field'), $('ammoAdv')],
+    range: () => [$('rangeField')], standoff: () => [$('standoffField')],
+    alpha: () => [$('alpha').closest('.field')], beta: () => [$('beta').closest('.field')], descent: () => [$('descent').closest('.field')],
+    layers: () => [$('presetSel').closest('.field'), $('layers'), $('addRow')],
+    hitY: () => [$('hitY').closest('.field')], hatch: () => [$('hatchMode').closest('.field'), $('relief').closest('label')],
+    crew: () => [$('crewList'), $('addCrew').closest('.row')], veh: () => [$('compSel').closest('.field'), $('boxDims')]
+  };
+  const DOCK_KEYS = { ammo: ['ammo', 'range', 'standoff'], armor: ['alpha', 'beta', 'descent', 'layers'], crew: ['hitY', 'hatch', 'crew', 'veh'] };
+  function applyLock() {
+    const inCh = !!CH.find(c => c.id === S.challenge);
+    Object.entries(EDIT_UI).forEach(([k, f]) => f().forEach(el => el && el.classList.toggle('locked', !canEdit(k))));
+    const tabs = document.querySelectorAll('.dock-tabs [data-dock]');
+    tabs.forEach(b => { const ks = DOCK_KEYS[b.dataset.dock]; b.hidden = inCh && (!ks || !ks.some(canEdit)); });
+    const cur = document.querySelector(`.dock-tabs [data-dock="${S.dock}"]`);
+    if (cur && cur.hidden) { const first = [...tabs].find(b => !b.hidden); if (first) setDock(first.dataset.dock); }
+    document.body.classList.toggle('in-challenge', inCh);
+  }
   function startChallenge(id) {
     const ch = CH.find(c => c.id === id); if (!ch) return; const s = ch.setup();
-    S.challenge = id; S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = s.slatMode || 'random'; S.hitU = 0.55;
+    S.challenge = id; S.chShots = 0; S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = s.slatMode || 'random'; S.hitU = 0.55;
     if (s.preset) { const p = D.PRESETS.find(x => x.id === s.preset); S.presetId = p.id; S.stack = clone(p.layers); S.alpha = p.alpha; S.vehId = p.veh; } else { S.presetId = ''; S.stack = clone(s.stack); S.alpha = s.alpha || 0; }
     if (s.veh) S.vehId = s.veh;
     S.crewVeh = null; S.comp.hatchMode = 0;
     if (s.range != null) S.range = s.range;
-    save(); showView('lab'); compute(); renderAll(); if (r3d && S.view === '3d') r3d.setScene(SC);
+    save(); showView('lab'); setDock(DOCK_KEYS.ammo.some(canEdit) ? 'ammo' : DOCK_KEYS.armor.some(canEdit) ? 'armor' : 'crew'); compute(); renderAll(); applyLock(); if (r3d && S.view === '3d') r3d.setScene(SC);
   }
   let lastPass = null;
-  function checkChallenge() {
+  const EDIT_NAME = { ammo: '彈種', range: '射距', standoff: '炸高', alpha: '傾角', beta: '側轉', descent: '俯角', layers: '裝甲層', hitY: '命中點', hatch: '艙蓋', crew: '乘員', veh: '車體' };
+  /** fired：這次呼叫來自開火（只有開火才判定成績；同成績時發數較少者更好） */
+  function checkChallenge(fired) {
     const bar = $('chBar'); const ch = CH.find(c => c.id === S.challenge);
+    applyLock();
     if (!ch) { bar.hidden = true; return; }
     bar.hidden = false; $('chBarTitle').textContent = '任務：' + ch.title;
     const r = ch.check(RES, BEH || { crew: [] });
-    const best = S.best[ch.id];
-    $('chBarGoal').textContent = ch.goal + (r.pass ? `　✔ 已達成（${r.fmt(r.score)}）` : '　✘ 尚未達成') + (best != null ? `　最佳：${r.fmt(best)}` : '');
-    if (r.pass) {
-      const better = best == null || (r.higher ? r.score > best : r.score < best);
-      if (better) { S.best[ch.id] = r.score; save(); if (lastPass !== ch.id + r.score) toast(`任務達成：${ch.title}（${r.fmt(r.score)}）`); }
-      lastPass = ch.id + r.score;
+    if (fired) S.chLast = { pass: r.pass, score: r.score };
+    const L = S.chShots ? S.chLast : null;
+    const best = S.best[ch.id]; const bs = (S.bestShots || {})[ch.id]; const shots = S.chShots || 0;
+    $('chBarGoal').textContent = ch.goal + `　可調：${ch.edit.map(k => EDIT_NAME[k]).join('、')}　已射 ${shots} 發`
+      + (L ? (L.pass ? `　✔ 上一發達成（${r.fmt(L.score)}）` : '　✘ 上一發未達成') : '')
+      + (best != null ? `　最佳：${r.fmt(best)}${bs ? `（${bs} 發）` : ''}` : '');
+    if (fired && r.pass) {
+      const better = best == null || (r.higher ? r.score > best : r.score < best) || (r.score === best && (!bs || shots < bs));
+      if (better) { S.best[ch.id] = r.score; S.bestShots = S.bestShots || {}; S.bestShots[ch.id] = shots; save(); if (lastPass !== ch.id + r.score + '/' + shots) toast(`任務達成：${ch.title}（${r.fmt(r.score)}，${shots} 發）`); }
+      lastPass = ch.id + r.score + '/' + shots;
     }
   }
-  $('chBarExit').addEventListener('click', () => { S.challenge = null; save(); checkChallenge(); });
+  $('chBarExit').addEventListener('click', () => { S.challenge = null; save(); checkChallenge(); renderAll(); });
   function renderChallenges() {
     const done = CH.filter(c => S.best[c.id] != null).length;
     $('chProgress').textContent = `${done} / ${CH.length} 完成`;
-    $('chGrid').innerHTML = CH.map(c => { const b = S.best[c.id]; const r = c.check({ verdict: '', subs: [], margin: 0 }, { crew: [], kill: null }); return `<div class="ch${b != null ? ' done' : ''}"><h3>${esc(c.title)}</h3><div class="goal">${esc(c.goal)}</div><div class="foot"><span class="best">${b != null ? '✔ 最佳 ' + esc(r.fmt(b)) : '未完成'}</span><button class="btn small primary" data-ch="${c.id}">開始</button></div></div>`; }).join('');
+    $('chGrid').innerHTML = CH.map(c => { const b = S.best[c.id]; const r = c.check({ verdict: '', subs: [], margin: 0 }, { crew: [], kill: null }); return `<div class="ch${b != null ? ' done' : ''}"><h3>${esc(c.title)}</h3><div class="goal">${esc(c.goal)}</div><div class="goal" style="opacity:.75">可調：${c.edit.map(k => EDIT_NAME[k]).join("、")}</div><div class="foot"><span class="best">${b != null ? '✔ 最佳 ' + esc(r.fmt(b)) + ((S.bestShots || {})[c.id] ? '（' + S.bestShots[c.id] + ' 發）' : '') : '未完成'}</span><button class="btn small primary" data-ch="${c.id}">開始</button></div></div>`; }).join('');
   }
   $('chGrid').addEventListener('click', e => { const b = e.target.closest('[data-ch]'); if (b) startChallenge(b.dataset.ch); });
 
@@ -958,7 +995,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
     const p = D.PRESETS.find(x => x.id === s.preset);
     S.scenId = id; S.challenge = null; S.ammoId = s.ammo; S.standoff = null; S.presetId = p.id; S.stack = clone(p.layers); S.alpha = s.alpha != null ? s.alpha : p.alpha;
     S.beta = s.beta || 0; S.descent = s.descent || 0; S.range = s.range; S.vehId = s.veh || p.veh; S.hitU = s.hitU != null ? s.hitU : 0.55; S.crewVeh = null; S.slatMode = 'random';
-    save(); compute(); renderAll(); if (r3d && S.view === '3d') r3d.setScene(SC);
+    save(); compute(); renderAll(); checkChallenge(); if (r3d && S.view === '3d') r3d.setScene(SC);
     toast(`已載入情境：${s.name}`);
   }
 

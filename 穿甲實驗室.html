@@ -118,6 +118,9 @@ details.adv .grid2 { margin-top: 8px; }
 .vp-tools button:hover { border-color: rgba(255, 255, 255, .5); }
 .cut-ctl { display: flex; align-items: center; gap: 6px; background: rgba(10, 14, 18, .74); color: #c9d2d8; border: 1px solid rgba(255, 255, 255, .18); border-radius: 5px; padding: 2px 9px; font-size: 12px; }
 .cut-ctl[hidden] { display: none; }
+/* 任務模式：只顯示可修改的項目 */
+.locked { display: none !important; }
+body.in-challenge #ammoNote, body.in-challenge #vehDesc, body.in-challenge #resetCrew, body.in-challenge #reseed, body.in-challenge #seedTag { display: none !important; }
 .cut-ctl input { width: 130px; accent-color: var(--xray); }
 .vp-hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 10px; transition: opacity .6s; background: rgba(8,11,14,.7); padding: 3px 10px; border-radius: 4px; color: rgba(231, 236, 239, .55); font-size: 11.5px; pointer-events: none; white-space: nowrap; }
 .transport { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line); flex-wrap: wrap; }
@@ -516,24 +519,24 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 </div>
 <div class="tip" id="tip" hidden></div>
 
-<script src="lib/three/three.min.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/CopyShader.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/EffectComposer.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/RenderPass.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/ShaderPass.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/UnrealBloomPass.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/GammaCorrectionShader.js?v=mwh7pc81"></script>
-<script src="lib/three/examples/RGBELoader.js?v=mwh7pc81"></script>
-<script src="lib/mp4-muxer.min.js?v=mwh7pc81"></script>
-<script src="data.js?v=mwh7pc81"></script>
-<script src="projgeom.js?v=mwh7pc81"></script>
-<script src="vehicles.js?v=mwh7pc81"></script>
-<script src="engine.js?v=mwh7pc81"></script>
-<script src="armor.js?v=mwh7pc81"></script>
-<script src="audio.js?v=mwh7pc81"></script>
-<script src="render2d.js?v=mwh7pc81"></script>
-<script src="render3d.js?v=mwh7pc81"></script>
-<script src="app.js?v=mwh7pc81"></script>
+<script src="lib/three/three.min.js?v=mwh81l23"></script>
+<script src="lib/three/examples/CopyShader.js?v=mwh81l23"></script>
+<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwh81l23"></script>
+<script src="lib/three/examples/EffectComposer.js?v=mwh81l23"></script>
+<script src="lib/three/examples/RenderPass.js?v=mwh81l23"></script>
+<script src="lib/three/examples/ShaderPass.js?v=mwh81l23"></script>
+<script src="lib/three/examples/UnrealBloomPass.js?v=mwh81l23"></script>
+<script src="lib/three/examples/GammaCorrectionShader.js?v=mwh81l23"></script>
+<script src="lib/three/examples/RGBELoader.js?v=mwh81l23"></script>
+<script src="lib/mp4-muxer.min.js?v=mwh81l23"></script>
+<script src="data.js?v=mwh81l23"></script>
+<script src="projgeom.js?v=mwh81l23"></script>
+<script src="vehicles.js?v=mwh81l23"></script>
+<script src="engine.js?v=mwh81l23"></script>
+<script src="armor.js?v=mwh81l23"></script>
+<script src="audio.js?v=mwh81l23"></script>
+<script src="render2d.js?v=mwh81l23"></script>
+<script src="render3d.js?v=mwh81l23"></script>
+<script src="app.js?v=mwh81l23"></script>
 
 </html>
