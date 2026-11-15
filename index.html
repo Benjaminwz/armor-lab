@@ -113,6 +113,68 @@ details.adv .grid2 { margin-top: 8px; }
 .vp-tools button:hover { border-color: rgba(255, 255, 255, .5); }
 .cut-ctl { display: flex; align-items: center; gap: 6px; background: rgba(10, 14, 18, .74); color: #c9d2d8; border: 1px solid rgba(255, 255, 255, .18); border-radius: 5px; padding: 2px 9px; font-size: 12px; }
 .cut-ctl[hidden] { display: none; }
+
+/* ===== 任務模式：獨立介面（作戰命令風格） ===== */
+.msn-strip, .msn-brief, .msn-panel, .msn-params { display: none; }
+body.in-challenge { --accent: #d6c46a; --accent-ink: #17170c; --accent-soft: rgba(214,196,106,.14); --panel: #13160f; --panel-2: #1a1e14; --panel-3: #23281b; --line: #2b3122; --line-2: #3d4530; --bg: #0c0e09; }
+body.in-challenge .tabs, body.in-challenge .dock-tabs, body.in-challenge .dock:not(.right) .sec-h, body.in-challenge #reportBtn, body.in-challenge .cb:has(#autoRec) { display: none !important; }
+body.in-challenge .msn-strip:not([hidden]) { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; align-self: stretch; padding: 0 12px; background: repeating-linear-gradient(-45deg, transparent 0 14px, rgba(214,196,106,.05) 14px 28px); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.msn-strip .code { font-family: var(--f-display); font-size: 20px; letter-spacing: .06em; color: var(--accent); }
+.msn-strip .ttl { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msn-strip .shots { display: flex; align-items: center; gap: 4px; margin-left: auto; font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.msn-strip .shots i { width: 7px; height: 18px; border-radius: 3px 3px 1px 1px; background: var(--line-2); }
+.msn-strip .shots i.on { background: var(--accent); }
+.msn-strip .shots span { margin-left: 6px; }
+body.in-challenge .msn-brief:not([hidden]) { display: block; margin: 10px; padding: 12px 14px 14px; background: #1d2016; border: 1px solid var(--line-2); border-left: 3px solid var(--accent); border-radius: 4px; font-size: 13px; }
+.op-head { display: flex; justify-content: space-between; gap: 8px; font-family: var(--f-mono); font-size: 11px; letter-spacing: .08em; color: var(--muted); }
+.op-head b { color: var(--accent); }
+.msn-brief h2 { margin: 4px 0 8px; font-family: var(--f-display); font-size: 24px; letter-spacing: .04em; line-height: 1.1; text-wrap: balance; }
+.msn-brief h3 { margin: 10px 0 2px; font-size: 11px; letter-spacing: .2em; color: var(--muted); font-weight: 700; }
+.msn-brief p { margin: 0; color: var(--ink-2); text-wrap: pretty; }
+.msn-brief p.order { color: var(--ink); font-weight: 600; }
+.chips2 { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.chips2 span { font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--accent); color: var(--accent); border-radius: 99px; }
+.chips2 span.dim { border-color: var(--line-2); color: var(--muted); }
+body.in-challenge .msn-params { display: block; padding: 4px 14px 0; font-size: 11px; letter-spacing: .2em; color: var(--muted); font-weight: 700; }
+body.in-challenge .dock:not(.right) .dock-panel:not(.locked) { display: block !important; padding-top: 6px; padding-bottom: 6px; }
+body.in-challenge .dock:not(.right) .dock-panel.locked { display: none !important; }
+body.in-challenge .msn-panel:not([hidden]) { display: block; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+body.in-challenge .msn-panel .sec-h { padding: 0; margin: 12px 0 6px; }
+body.in-challenge .msn-panel .sec-h:first-child { margin-top: 0; }
+.objs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.objs li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 5px 8px; background: var(--panel-2); border-radius: 5px; border: 1px solid var(--line); }
+.objs li .mk { font-family: var(--f-mono); color: var(--muted); }
+.objs li.ok { border-color: rgba(76,197,122,.5); } .objs li.ok .mk { color: var(--pp); }
+.objs li.no { border-color: rgba(240,104,90,.5); } .objs li.no .mk { color: var(--cp); }
+.meter { margin-top: 10px; }
+.meter .lbl { font-size: 12px; }
+.meter .bar { position: relative; height: 8px; margin-top: 4px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+.meter .bar i { display: block; height: 100%; background: var(--pp); transition: width .15s ease-out; }
+.meter .bar b { position: absolute; left: 80%; top: 0; bottom: 0; width: 2px; background: var(--ink); }
+.meter.over .bar i { background: var(--cp); } .meter.over output { color: var(--cp); }
+.medals { display: grid; gap: 3px; margin-top: 10px; font-size: 12px; font-family: var(--f-mono); color: var(--muted); }
+.medals span.got { color: var(--accent); }
+.medals span.got::after { content: ' ✔'; }
+.hints { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 12.5px; color: var(--ink-2); text-wrap: pretty; }
+#msnHintBtn { margin-top: 8px; width: 100%; }
+.msn-wait { margin: 10px 0 0; padding: 8px 10px; border: 1px dashed var(--line-2); border-radius: 5px; font-size: 12.5px; color: var(--ink-2); }
+.msn-wait[hidden] { display: none; }
+/* 未試射前不顯示任何結果，也不能播放 */
+body.msn-plan .dock.right > .dock-panel, body.msn-plan .stat:has(#stEq) { display: none !important; }
+body.msn-plan #playBtn, body.msn-plan #replayBtn, body.msn-plan .scrub-wrap, body.msn-plan #speedSel, body.msn-plan #xrayBtn, body.msn-plan #thermalBtn { opacity: .35; pointer-events: none; }
+.box.debrief { width: min(520px, 100%); padding: 22px 24px; text-align: left; }
+.box.debrief h2 { margin: 10px 0 12px; font-size: 18px; }
+.box.debrief p { color: var(--ink-2); margin: 12px 0 0; text-wrap: pretty; }
+.box.debrief .foot { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.stamp { display: inline-block; font-family: var(--f-display); font-size: 34px; letter-spacing: .1em; padding: 2px 14px; border: 3px solid currentColor; border-radius: 4px; transform: rotate(-4deg); animation: stampIn .25s cubic-bezier(.2,.9,.3,1.2); }
+.stamp.ok { color: var(--pp); } .stamp.no { color: var(--cp); }
+@keyframes stampIn { from { transform: rotate(-4deg) scale(1.6); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .stamp { animation: none; } }
+body.in-challenge [data-cdel], body.in-challenge #addCrew, body.in-challenge .field:has(#presetSel) { display: none !important; }
+.ch.dossier { border-left: 3px solid var(--line-2); }
+.ch.dossier.done { border-left-color: var(--pp); }
+.ch.dossier.shut { opacity: .5; }
+.ch .best.m1 { color: #c98b5a; } .ch .best.m2 { color: #cfd6dc; } .ch .best.m3 { color: #f0c24a; }
 /* 任務模式：只顯示可修改的項目 */
 .locked { display: none !important; }
 body.in-challenge #ammoNote, body.in-challenge #vehDesc, body.in-challenge #resetCrew, body.in-challenge #reseed, body.in-challenge #seedTag { display: none !important; }
@@ -296,10 +358,11 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
   <button class="brand" id="menuBtn" title="主選單（Esc）"><span class="mark">APL</span><h1>穿甲實驗室</h1></button>
   <nav class="tabs" role="tablist" aria-label="主要分頁">
     <button role="tab" id="tab-lab" aria-selected="true" data-view="lab">實驗台</button>
-    <button role="tab" id="tab-challenge" aria-selected="false" data-view="challenge">任務</button>
+    <button role="tab" id="tab-challenge" aria-selected="false" data-view="challenge">作戰任務</button>
     <button role="tab" id="tab-db" aria-selected="false" data-view="db">資料庫</button>
     <button role="tab" id="tab-models" aria-selected="false" data-view="models">模型與來源</button>
   </nav>
+  <div class="msn-strip" id="msnStrip" hidden><b class="code" id="msnCode"></b><span class="ttl" id="msnTitle"></span><span class="shots" id="msnShots"></span><button class="btn small" id="msnRestart">重新開始</button><button class="btn small" id="msnExit">離開任務</button></div>
   <div class="top-actions">
     <button class="btn rec" id="recBtn" aria-pressed="false" title="錄製畫面（MP4）"><span class="dot"></span><span id="recLbl">錄影</span></button>
     <button class="btn" id="shotBtn" title="儲存目前畫面為 PNG">截圖</button>
@@ -311,6 +374,8 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 <div id="view-lab" class="lab">
   <!-- 左：設定塢 -->
   <aside class="dock" aria-label="設定">
+    <div class="msn-brief" id="msnBrief" hidden></div>
+    <div class="msn-params">設計參數</div>
     <div class="dock-tabs" role="tablist" aria-label="設定分類">
       <button role="tab" data-dock="scen" aria-selected="false">情境</button>
       <button role="tab" data-dock="ammo" aria-selected="true">彈藥</button>
@@ -416,6 +481,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 
   <!-- 右：命中報告 -->
   <aside class="dock right" aria-label="命中報告">
+    <div class="msn-panel" id="msnPanel" hidden><div id="msnBody"></div><button class="btn small" id="msnHintBtn">再看一則提示</button><p class="msn-wait" id="msnWait"></p></div>
     <div class="dock-panel">
       <div class="sec-h"><h2>命中報告</h2><span class="tag mono" id="reportMeta">—</span></div>
       <div class="verdict" id="verdict"><span class="code" id="vCode">—</span><span class="word" id="vWord">尚未射擊</span><span class="sub" id="vSub"></span></div>
@@ -434,8 +500,8 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 </div>
 
 <div id="view-challenge" class="page" hidden>
-  <section class="card"><header><h2>任務</h2><span class="tag" id="chProgress"></span></header>
-    <div class="body"><p class="note">每個任務會載入指定的彈藥、靶板與車體。在實驗台調整角度、距離、裝甲層或乘員位置後開火，系統自動判定是否達成並記錄最佳成績。</p><div class="ch-grid" id="chGrid"></div></div>
+  <section class="card"><header><h2>作戰任務</h2><span class="tag" id="chProgress"></span></header>
+    <div class="body"><p class="note">每個任務只開放少數幾項設定。結果不會預先顯示，必須實際試射，而試射彈數有限。依成績或用彈數評定銅、銀、金牌；想拿金牌，最多只能看 1 則設計提示。</p><div class="ch-grid" id="chGrid"></div></div>
   </section>
 </div>
 <div id="view-db" class="page" hidden></div>
@@ -455,7 +521,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
     <nav aria-label="主選單項目">
       <button class="primary" data-go="lab">繼續實驗 <small>沙盒</small></button>
       <button data-go="scen">情境預設 <small id="menuScenN"></small></button>
-      <button data-go="challenge">任務 <small id="menuChN"></small></button>
+      <button data-go="challenge">作戰任務 <small id="menuChN"></small></button>
       <button data-go="db">資料庫 <small>彈藥・材質・ERA</small></button>
       <button data-go="models">模型與來源 <small>公式與文獻</small></button>
       <button data-go="settings">設定 <small>畫質・特效・音效</small></button>
@@ -510,6 +576,15 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
     <header><h2 id="recTitle">錄影完成</h2><button class="btn small ghost" id="recClose">關閉</button></header>
     <video id="recVideo" controls playsinline></video>
     <div class="foot"><span class="msg" id="recMsg"></span><button class="btn" id="recDiscard">捨棄</button><button class="btn primary" id="recSave">儲存影片</button></div>
+  </div>
+</div>
+<div class="modal" id="msnDebrief" hidden role="dialog" aria-modal="true" aria-labelledby="dbTitle">
+  <div class="box debrief">
+    <div class="stamp" id="dbStamp"></div>
+    <h2 id="dbTitle"></h2>
+    <ul class="objs" id="dbObjs"></ul>
+    <p id="dbLine"></p>
+    <div class="foot"><button class="btn" id="dbList">任務列表</button><button class="btn" id="dbRetry">再試</button><button class="btn primary" id="dbNext">下一個任務</button></div>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>

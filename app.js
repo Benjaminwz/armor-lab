@@ -68,7 +68,7 @@
   function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); r3d.setCut((S.opts.cut || 0) / 100); } } return r3d; }
   r2d.onCrewMove = (i, x, y) => onCrewMove(i, x, y, S.crew[i].z || 0);
   r2d.onCrewDrop = i => onCrewDrop(i);
-  window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow() }; // 偵錯用
+  window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow(), get S() { return S; }, get BEH() { return BEH; }, compute: () => compute(), sim: (id, stack, e) => { const r = E.simulate(Object.assign({}, baseAmmo(id)), stack, Object.assign(env(), e || {})); return { v: r.verdict, areal: Math.round(projAreal(r)), margin: r.margin }; }, D }; // 偵錯用
   r2d.onHitMove = u => { if (!canEdit('hitY')) return; S.hitU = +u.toFixed(3); clearTimeout(cT); cT = setTimeout(compute, 40); };
   r2d.onHitDrop = () => save();
 
@@ -97,7 +97,8 @@
     if (r3d && S.view === '3d') r3d.setScene(SC);
     else if (r3d) r3d.needsScene = true;
     renderSummary(); renderArmorStats(); renderReport(); curvesDirty = true; if (S.rt === 'curves') scheduleCurves();
-    if (!P.playing) { P.d = P.dur; drawNow(); }
+    if (curCh()) msnDirty();
+    if (!P.playing) { P.d = curCh() ? 0 : P.dur; drawNow(); }
   }
   function computeBehindOnly() {
     BEH = E.behind(RES, HULL, S.crew, env());
@@ -105,6 +106,7 @@
     r2d.setScene(SC);
     if (r3d && S.view === '3d' && r3d.sc) { r3d.setBehind(SC); S.crew.forEach((c, i) => r3d.moveCrew(i, c)); }
     renderSummary(); if (S.rt === 'crew') renderReport();
+    if (curCh()) msnDirty();
     if (!P.playing) drawNow();
   }
   let dragT = 0;
@@ -153,7 +155,7 @@
     if (SC.field && SC.field.ok) { fieldBehind = !SC.field.advance(Math.max(st.t, 0), P.playing ? 22 : 90); st.fieldT = SC.field.t; SC.field.render(S.thermal ? 'thermal' : 'normal', S.view === '3d'); }
     const xr = !!S.xray || (S.opts.xrayAuto && /behind|cool|end/.test(st.phase) && (/perforated|scab/.test(RES.verdict)));
     r2d.xray = xr; if (r3d) r3d.xray = xr;
-    sfxStep(st);
+    sfxStep(st); msnTick(st);
     if (S.view === '3d' && r3d) { if (r3d.needsScene) { r3d.setScene(SC); r3d.needsScene = false; } r3d.draw(st); } else r2d.draw(st);
     $('hudPhase').textContent = { approach: '彈道飛行', fuze: '引信作用・起爆', pen: '侵徹', behind: '車內後效', cool: '冷卻・熱傳導', end: '結束' }[st.phase] + (fieldBehind ? '（熱傳導計算中）' : '');
     $('hudClock').textContent = st.phase === 'approach' ? `T − ${Math.abs(st.t * 1e3).toFixed(2)} ms` : (st.t < 2e-3 ? `t = ${(st.t * 1e6).toFixed(0)} µs` : (st.t < 1 ? `t = ${(st.t * 1e3).toFixed(2)} ms` : `t = ${st.t.toFixed(2)} s`));
@@ -176,6 +178,7 @@
   });
   requestAnimationFrame(tick);
   function play(fromStart) {
+    if (curCh() && MS.state === 'plan') return; // 任務中：未試射前不能播放結果
     if (fromStart) P.d = 0;
     if (P.d >= P.dur) P.d = 0;
     P.playing = true; setPlayUI();
@@ -185,12 +188,13 @@
   $('fireBtn').addEventListener('click', () => {
     if ($('autoRec').checked && !REC.active) { REC.start(true); }
     r2d.userCam = null; $('camAuto').hidden = true; if (r3d) r3d.applyCam('auto');
+    if (curCh()) { if (!shotsLeft(curCh())) return; msnFire(); }
     logShot(); playFireSound(); play(true);
-    if (S.challenge) { S.chShots = (S.chShots || 0) + 1; save(); checkChallenge(true); }
+    
   });
   $('replayBtn').addEventListener('click', () => play(true));
   $('speedSel').addEventListener('change', e => { S.speed = +e.target.value; save(); });
-  $('scrub').addEventListener('input', e => { P.playing = false; setPlayUI(); P.d = (+e.target.value / 1000) * P.dur; drawNow(); });
+  $('scrub').addEventListener('input', e => { if (curCh() && MS.state === 'plan') { e.target.value = 0; return; } P.playing = false; setPlayUI(); P.d = (+e.target.value / 1000) * P.dur; drawNow(); });
 
   /* ---------------- 視圖切換 ---------------- */
   function setView(v) {
@@ -658,95 +662,228 @@
   }
   document.addEventListener('click', e => { if (e.target.id === 'clearLog') { S.log = []; save(); renderReport(); } });
 
-  /* ---------------- 任務 ---------------- */
+  /* ---------------- 任務模式（獨立介面） ----------------
+     與實驗台的差別：
+     ・只顯示該任務可調的參數；左側是作戰命令，右側是目標、限重、提示
+     ・結果不預先顯示——必須實際試射才知道（試射發數有限）
+     ・依成績或用彈數評定銅／銀／金牌；金牌最多只能看 1 則提示
+     edit 鍵：range 射距、alpha 傾角、descent 俯角、layers 裝甲層、hitY 命中點、hatch 艙蓋與洩壓、crew 乘員 */
   const sameStack = id => JSON.stringify((D.PRESETS.find(p => p.id === id) || {}).layers) === JSON.stringify(S.stack);
-  /** 原預設裝甲層仍完整保留在最前面（只能「加」層） */
   const keepsPreset = id => { const L = (D.PRESETS.find(p => p.id === id) || {}).layers || []; return S.stack.length >= L.length && JSON.stringify(S.stack.slice(0, L.length)) === JSON.stringify(L); };
-  /*
-    任務：每項只開放 edit 列出的設定，其餘控制項在任務中隱藏（無法修改）。
-    edit 鍵：ammo 彈種、range 射距、standoff 炸高、alpha 傾角、beta 側轉、descent 俯角、layers 裝甲層、
-             hitY 命中點、hatch 艙蓋與洩壓、crew 乘員位置、veh 車體
-  */
+  const stopped = r => r && r.verdict !== 'perforated' && r.verdict !== 'scab' && r.verdict !== 'slat';
+  const kg = v => `${Math.round(v)} kg/m²`;
+  const addedAreal = (r, id) => { try { return projAreal(r) - projAreal(E.simulate(ammo(), (D.PRESETS.find(p => p.id === id) || {}).layers || [], env())); } catch (_) { return 0; } };
+  const hurt = b => b.crew.filter(c => c.sev >= 2).length;
   const CH = [
-    { id: 't34', title: 'T-34 首上之謎', edit: ['range', 'descent'], goal: '用 7.5 cm Pzgr.39 在 500 m 以上擊穿 T-34 首上，距離越遠越好。',
-      setup: () => ({ ammoId: 'KWK40', preset: 't34', range: 800 }), check: r => ({ pass: r.verdict === 'perforated' && S.range >= 500 && S.ammoId === 'KWK40' && sameStack('t34') && Math.abs(S.alpha - 60) < 0.01, score: S.range, fmt: v => `${v} m`, higher: true }) },
-    { id: 'ric', title: '跳彈邊緣', edit: ['alpha'], goal: '3BM42 射擊 150 mm 鋼板：找出仍能貫穿的最大傾角，70° 以上過關。',
-      setup: () => ({ ammoId: '3BM42', stack: [{ kind: 'plate', mat: 'RHA', t: 150 }], range: 2000, alpha: 60, veh: 'box' }), check: r => ({ pass: r.verdict === 'perforated' && S.ammoId === '3BM42' && S.range >= 2000 && S.stack.length === 1 && S.stack[0].mat === 'RHA' && S.stack[0].t === 150 && S.beta === 0 && S.descent === 0 && S.alpha >= 70, score: S.alpha, fmt: v => `${v.toFixed(1)}°`, higher: true }) },
-    { id: 'rpg', title: '輕量化對抗 RPG', edit: ['layers'], goal: '設計裝甲擋下 PG-7VL（格柵無效），面密度 ≤ 600 kg/m²，越輕越好。',
-      setup: () => ({ ammoId: 'PG7VL', stack: [{ kind: 'plate', mat: 'RHA', t: 30 }], alpha: 0, slatMode: 'pass', veh: 'apc' }), check: r => ({ pass: r.verdict !== 'perforated' && r.verdict !== 'slat' && S.ammoId === 'PG7VL' && projAreal(r) <= 600 && S.slatMode === 'pass' && S.standoff == null, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'tandem', title: '串聯彈頭', edit: ['layers'], goal: '擋下 PG-7VR 串聯彈頭（前驅裝藥會先引爆第一組 ERA），面密度 ≤ 1000 kg/m²。',
-      setup: () => ({ ammoId: 'PG7VR', stack: [{ kind: 'era', model: 'K1' }, { kind: 'plate', mat: 'RHA', t: 60 }], alpha: 0, slatMode: 'pass', veh: 'mbt_east' }), check: r => ({ pass: r.verdict === 'stopped' && S.ammoId === 'PG7VR' && projAreal(r) <= 1000 && S.standoff == null, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'silver', title: '擋住銀彈', edit: ['layers', 'alpha'], goal: '擋下 2000 m 的 M829A1，面密度 ≤ 2600 kg/m²（純鋼板約需 4800）。',
-      setup: () => ({ ammoId: 'M829A1', preset: 't64', range: 2000 }), check: r => ({ pass: r.verdict !== 'perforated' && S.ammoId === 'M829A1' && S.range >= 2000 && projAreal(r) <= 2600 && S.beta === 0 && S.descent === 0, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'aphe', title: '高爆穿甲彈入艙', edit: ['crew', 'hatch'], goal: 'BR-471 會擊穿雪曼並在艙內爆開。安排乘員位置與艙蓋，讓至少 2 人僅輕傷或無傷。',
-      setup: () => ({ ammoId: 'BR471', preset: 'sherman', range: 500 }), check: (r, b) => { const ok = b.crew.filter(c => c.sev <= 1).length; return { pass: r.verdict === 'perforated' && S.ammoId === 'BR471' && sameStack('sherman') && S.crew.length >= 3 && ok >= 2, score: ok, fmt: v => `${v} 人倖存`, higher: true }; } },
-    { id: 'liner', title: '防破片內襯', edit: ['layers'], goal: '30 mm 穿甲彈會擊穿 M113。在原裝甲後方加層（增加 ≤ 120 kg/m²），讓無人重傷。',
-      setup: () => ({ ammoId: 'APFSDS30', preset: 'm113', range: 1000 }), check: (r, b) => { const base = 38 * 2660 / Math.cos(45 * DEG); return { pass: keepsPreset('m113') && S.ammoId === 'APFSDS30' && S.range >= 1000 && projAreal(r) - base <= 120 && S.crew.length >= 3 && b.crew.every(c => c.sev < 2), score: projAreal(r) - base, fmt: v => `+${Math.round(v)} kg/m²`, higher: false }; } },
-    { id: 'hesh', title: '碎甲彈的剋星', edit: ['layers', 'alpha'], goal: '碎甲彈會讓 100 mm 鋼板背面剝落。重新設計裝甲（≤ 950 kg/m²）擋住剝落塊。',
-      setup: () => ({ ammoId: 'L35', preset: 'rha100', range: 500 }), check: r => ({ pass: S.ammoId === 'L35' && r.verdict !== 'scab' && projAreal(r) <= 950, score: projAreal(r), fmt: v => `${Math.round(v)} kg/m²`, higher: false }) },
-    { id: 'nocook', title: '別讓轉盤殉爆', edit: ['hitY', 'descent'], goal: 'M829A1 擊穿 T-72A：選擇命中點與俯角，讓它被擊穿卻不殉爆（無 K-KILL）。',
-      setup: () => ({ ammoId: 'M829A1', preset: 't72a', range: 2000 }), check: (r, b) => ({ pass: S.ammoId === 'M829A1' && S.range >= 2000 && sameStack('t72a') && r.verdict === 'perforated' && !(b.kill && b.kill.K), score: b.crew.filter(c => c.sev <= 1).length, fmt: v => `${v} 人輕傷以下`, higher: true }) },
-    { id: 'mkill', title: '精準機動殺傷', edit: ['hitY', 'descent'], goal: 'RPG-7 命中步兵戰車：造成 M-KILL，但後艙載員全部只受輕傷或無傷。',
-      setup: () => ({ ammoId: 'PG7VL', preset: 'bmp1', range: 0 }), check: (r, b) => { const troops = S.crew.map((c, i) => [c, b.crew[i]]).filter(([c]) => c.role === 'troop'); return { pass: S.ammoId === 'PG7VL' && sameStack('bmp1') && b.kill && b.kill.M && troops.length >= 2 && troops.every(([, e]) => e && e.sev <= 1), score: troops.filter(([, e]) => e && e.sev === 0).length, fmt: v => `${v} 名載員無傷`, higher: true }; } }
+    { id: 't34', code: 'OP-01', title: '高地伏擊', place: '1943 年 7 月 · 庫斯克南翼', shots: 5, edit: ['descent'],
+      brief: '你的四號戰車配備 7.5 cm KwK 40。平射時，Pzgr.39 在 1000 m 打不穿 T-34 傾斜 60° 的首上裝甲。營部要你把車開上反斜面高地，從上往下打。',
+      order: '在 1000 m 擊穿 T-34 首上。爬得越高越容易暴露——用最小的俯角完成。',
+      setup: () => ({ ammoId: 'KWK40', preset: 't34', range: 1000 }),
+      check: r => ({ objs: [{ t: '擊穿 T-34 首上裝甲', ok: r.verdict === 'perforated' }], score: S.descent, fmt: v => `俯角 ${v.toFixed(1)}°`, higher: false }),
+      medals: { silver: 8, gold: 5 }, medalText: v => `俯角 ≤ ${v}°`,
+      hints: ['斜面的等效厚度 ＝ 板厚 ÷ cos(撞擊角)。60° 時，45 mm 鋼板相當於 90 mm。', '從高處往下打，彈道與斜面的夾角變小：俯角每增加 1°，撞擊角就少 1°。', '全口徑鈍頭彈在大斜角還會額外「滑開」，所以需要的俯角比單純幾何算出來的多一些。發數有限，用二分法逼近。'] },
+    { id: 'ric', code: 'OP-02', title: '跳彈邊緣', place: '靶場試驗 · 斜板極限', shots: 5, edit: ['alpha'],
+      brief: '研究所要測定 3BM42 長桿彈對 150 mm 均質鋼板的極限傾角。角度太大，穿甲桿不是被擋下就是直接滑走。',
+      order: '找出 2000 m 仍能完全貫穿的最大傾角。至少要達到 70°。',
+      setup: () => ({ ammoId: '3BM42', stack: [{ kind: 'plate', mat: 'RHA', t: 150 }], range: 2000, alpha: 60, veh: 'box' }),
+      check: r => ({ objs: [{ t: '完全貫穿 150 mm 鋼板', ok: r.verdict === 'perforated' }, { t: '傾角達 70° 以上', ok: S.alpha >= 70 }], score: S.alpha, fmt: v => `傾角 ${v.toFixed(1)}°`, higher: true }),
+      medals: { silver: 74, gold: 76.5 }, medalText: v => `傾角 ≥ ${v}°`,
+      hints: ['長桿彈要穿過的視線厚度 ＝ 板厚 ÷ cos α。70° 時 150 mm 已經是約 440 mm。', '超過臨界角後，穿甲桿會在板面上滑走（跳彈），這跟穿深夠不夠無關。極限角落在 75–80° 之間。', '發數有限：用二分法。先試中間值，穿了就往上、沒穿就往下，每發把範圍砍半。'] },
+    { id: 'rpg', code: 'OP-03', title: '輕量化對抗 RPG', place: '城鎮巡邏 · 輪式甲車側面', shots: 5, edit: ['layers'],
+      brief: '巡邏車隊一再遭到 PG-7VL 伏擊。底盤的載重餘裕只剩 600 kg/m²。情報顯示敵方已學會避開格柵，別指望它。',
+      order: '設計一組附加裝甲擋下 PG-7VL（垂直命中）。越輕越好。',
+      setup: () => ({ ammoId: 'PG7VL', stack: [{ kind: 'plate', mat: 'RHA', t: 30 }], alpha: 0, slatMode: 'pass', veh: 'apc' }),
+      meter: { val: r => projAreal(r), max: 600, label: '面密度' },
+      check: r => ({ objs: [{ t: '擋下 PG-7VL', ok: stopped(r) }, { t: '面密度 ≤ 600 kg/m²', ok: projAreal(r) <= 600 }], score: projAreal(r), fmt: kg, higher: false }),
+      medals: { silver: 530, gold: 480 }, medalText: v => `≤ ${v} kg/m²`,
+      hints: ['聚能射流怕的是側向擾動與距離，不是單純的厚度。同樣重量下，整塊鋼板是最差的選擇。', '爆炸反應裝甲要斜放（相對傾角 45–60°）：飛板掃過射流的長度最長，效果遠好於平貼。', '被 ERA 打散的射流，對陶瓷的穿深掉得特別多。兩層斜置 ERA 加一片薄陶瓷，比任何鋼板組合都輕。'] },
+    { id: 'tandem', code: 'OP-04', title: '串聯彈頭', place: '城鎮巡邏 · 敵方換裝新彈', shots: 5, edit: ['layers'],
+      brief: '敵方開始使用 PG-7VR：前驅小裝藥先引爆你的反應裝甲，主裝藥隨後跟進。原本的 Kontakt-1 加 60 mm 鋼板已經擋不住。',
+      order: '重新設計裝甲擋下 PG-7VR（垂直命中），面密度不得超過 1000 kg/m²。',
+      setup: () => ({ ammoId: 'PG7VR', stack: [{ kind: 'era', model: 'K1' }, { kind: 'plate', mat: 'RHA', t: 60 }], alpha: 0, slatMode: 'pass', veh: 'mbt_east' }),
+      meter: { val: r => projAreal(r), max: 1000, label: '面密度' },
+      check: r => ({ objs: [{ t: '擋下 PG-7VR', ok: r.verdict === 'stopped' }, { t: '面密度 ≤ 1000 kg/m²', ok: projAreal(r) <= 1000 }], score: projAreal(r), fmt: kg, higher: false }),
+      medals: { silver: 900, gold: 820 }, medalText: v => `≤ ${v} kg/m²`,
+      hints: ['前驅裝藥專門引爆第一層 ERA，所以第一層只是犧牲品。', '在第一層後面隔一段間隙再放第二層 ERA，主裝藥的射流才會碰到還沒引爆的炸藥。', '重型 ERA（Relikt 類）對串聯彈頭的抗性比 Kontakt-1 高。最後用陶瓷收尾，比鋼輕得多。'] },
+    { id: 'liner', code: 'OP-05', title: '防破片內襯', place: '機械化步兵 · M113 改良案', shots: 4, edit: ['layers'],
+      brief: '30 mm 脫殼穿甲彈一定會打穿 M113 的鋁裝甲，這點改變不了。彈道正前方的那個人救不了，但其他人是被裝甲背面噴出的破片打傷的。原本的鋁板不能動，工廠只允許增加 40 kg/m²。',
+      order: '在原裝甲後方加層，把重傷與陣亡壓到 1 人以下。加的重量越少越好。',
+      setup: () => ({ ammoId: 'APFSDS30', preset: 'm113', range: 1000 }),
+      meter: { val: r => addedAreal(r, 'm113'), max: 40, label: '增加的面密度' },
+      check: (r, b) => ({ objs: [{ t: '原鋁裝甲保持不變', ok: keepsPreset('m113') }, { t: '增加的面密度 ≤ 40 kg/m²', ok: addedAreal(r, 'm113') <= 40 }, { t: '重傷或陣亡不超過 1 人', ok: hurt(b) <= 1 }], score: addedAreal(r, 'm113'), fmt: v => `+${Math.round(v)} kg/m²`, higher: false }),
+      medals: { silver: 15, gold: 8 }, medalText: v => `增加 ≤ ${v} kg/m²`,
+      hints: ['你擋不住這發彈。目標是減少背面破片的數量與噴濺錐角。', '纖維內襯（芳綸、UHMWPE）要放在最內側、緊貼車內，才接得住剝落的破片。金屬板只會製造更多破片。', '內襯很輕。先用保守的厚度過關，再一發一發減薄，找出還有效的最小厚度。'] },
+    { id: 'seats', code: 'OP-06', title: '彈道上的座位', place: '機械化步兵 · 遭遇機砲伏擊', shots: 5, edit: ['crew'], view3d: true, medalBy: 'shots', medals: { silver: 3, gold: 2 },
+      brief: '偵察回報前方有一輛配備 30 mm 機砲的步兵戰車，它會打你的 M113 首上。裝甲來不及改，車上 6 個人一個都不能少。你只能在接敵前決定每個人坐在哪裡。',
+      order: '重新安排 6 名乘員的位置，讓車內沒有人重傷或陣亡。在 3D 畫面上拖曳乘員可前後左右移動。',
+      setup: () => ({ ammoId: 'APFSDS30', preset: 'm113', range: 1000 }),
+      check: (r, b) => ({ objs: [{ t: '6 名乘員都在車內', ok: S.crew.length === 6 }, { t: '無人重傷或陣亡', ok: S.crew.length === 6 && hurt(b) === 0 }], score: b.crew.filter(c => c.sev === 0).length, fmt: v => `${v} 人無傷`, higher: true }),
+      hints: ['穿甲桿貫穿後幾乎直線前進，還會打穿隔艙板繼續往後。站在這條線上的人，什麼都擋不住它。', '把第一個人移開之後，原本被他擋住的人就暴露了。要把整條彈道延長線都清空，不是只移一個人。', '背面破片呈錐形向外擴散，越靠近彈孔與軸線越危險。把人分散到車體兩側，並遠離命中點。'] },
+    { id: 'hesh', code: 'OP-07', title: '碎甲彈的剋星', place: '1960 年代 · 新型戰車首上設計', shots: 5, edit: ['layers', 'alpha'],
+      brief: '英製 105 mm L35 碎甲彈不必打穿鋼板：炸藥貼在板面起爆，應力波讓背面崩落一大塊。但敵方同一門砲也能發射 L28 脫殼穿甲彈。',
+      order: '設計一組首上裝甲：既不讓碎甲彈造成背面剝落，也要擋下 1000 m 的 L28 脫殼穿甲彈。限重 950 kg/m²。',
+      setup: () => ({ ammoId: 'L35', preset: 'rha100', range: 500 }),
+      also: [{ ammoId: 'L28', env: { range: 1000 }, label: '擋下 L28 脫殼穿甲彈（1000 m）' }],
+      meter: { val: r => projAreal(r), max: 950, label: '面密度' },
+      check: (r, b, x) => ({ objs: [{ t: '碎甲彈不造成背面剝落', ok: r.verdict !== 'scab' && r.verdict !== 'perforated' }, { t: '擋下 L28 脫殼穿甲彈（1000 m）', ok: stopped(x[0]) }, { t: '面密度 ≤ 950 kg/m²', ok: projAreal(r) <= 950 }], score: projAreal(r), fmt: kg, higher: false }),
+      medals: { silver: 800, gold: 690 }, medalText: v => `≤ ${v} kg/m²`,
+      hints: ['碎甲彈靠應力波在背面反射把鋼板拉裂。只要波傳不過去，就不會剝落。', '一道空氣間隙就能截斷應力波——間隙裝甲是碎甲彈的剋星。', '但薄外板擋不住脫殼穿甲彈：外板負責破壞碎甲彈，後面的主板（可以傾斜）負責擋動能彈。'] },
+    { id: 'nocook', code: 'OP-08', title: '別讓轉盤殉爆', place: '技術情報任務 · 擄獲 T-72A', shots: 4, edit: ['hitY', 'descent'], medalBy: 'shots', medals: { silver: 3, gold: 2 },
+      brief: '情報單位想要一輛「被擊穿但沒燒掉」的 T-72A 來研究。M829A1 在 2000 m 打穿它的首上不成問題，問題是車底那一圈自動裝填轉盤。',
+      order: '選擇命中點與射擊俯角：擊穿車輛，但不得引發殉爆（不可 K-KILL）。',
+      setup: () => ({ ammoId: 'M829A1', preset: 't72a', range: 2000 }),
+      check: (r, b) => ({ objs: [{ t: '擊穿首上裝甲', ok: r.verdict === 'perforated' }, { t: '車輛未殉爆（無 K-KILL）', ok: r.verdict === 'perforated' && !(b.kill && b.kill.K) }], score: b.crew.filter(c => c.sev <= 1).length, fmt: v => `${v} 人輕傷以下`, higher: true }),
+      hints: ['T-72 的自動裝填轉盤平放在戰鬥室地板上，彈頭與發射藥都在那一圈。', '穿甲桿貫穿後幾乎直線前進。在腦中把彈道延長，看它會經過什麼。', '別想從上方越過它：破片錐會往下掃到轉盤。讓穿甲桿在抵達轉盤之前就鑽進車底板——偏低的命中點加上大俯角。'] },
+    { id: 'mkill', code: 'OP-09', title: '精準機動殺傷', place: '人質救援 · 攔停步兵戰車', shots: 4, edit: ['hitY', 'descent'], medalBy: 'shots', medals: { silver: 3, gold: 2 },
+      brief: '一輛 BMP-1 載著被挾持的人員逃離。你只有一具 RPG-7。必須讓它停下來，但後艙的人不能有事。',
+      order: '命中首上造成 M-KILL（失去機動力）。車輛不得起火殉爆，後艙 4 名載員必須毫髮無傷。',
+      setup: () => ({ ammoId: 'PG7VL', preset: 'bmp1', range: 0 }),
+      check: (r, b) => { const tr = S.crew.map((c, i) => [c, b.crew[i]]).filter(([c]) => c.role === 'troop'); return { objs: [{ t: '造成 M-KILL', ok: !!(b.kill && b.kill.M) }, { t: '車輛未起火殉爆（無 K-KILL）', ok: !(b.kill && b.kill.K) }, { t: '後艙載員全部無傷', ok: tr.length >= 2 && tr.every(([, e]) => e && e.sev === 0) }], score: b.crew.filter(c => c.sev === 0).length, fmt: v => `${v} 人無傷`, higher: true }; },
+      hints: ['M-KILL 需要打壞發動機或變速箱。BMP-1 的動力艙在車首。', '射流貫穿後呈窄錐直線前進，沿途的模組與人員都會受害。載員坐在後艙。', '讓彈道落在動力艙內，延長線不要指向後艙。偏低的命中點加上俯角，可以讓射流往下走。'] },
+    { id: 'silver', code: 'OP-10', title: '擋住銀彈', place: '1991 年 · 新一代首上裝甲提案', shots: 6, edit: ['layers', 'alpha'],
+      brief: '波灣戰爭的戰報傳回設計局：M829A1 在 2000 m 打穿了現役戰車的首上，TOW-2A 飛彈也一樣。底盤最多能承受 2600 kg/m² 的首上裝甲——同樣防護的純鋼板要 4800。',
+      order: '設計新的首上裝甲，同時擋下 M829A1（2000 m）與 TOW-2A。限重 2600 kg/m²。',
+      setup: () => ({ ammoId: 'M829A1', preset: 't64', range: 2000 }),
+      also: [{ ammoId: 'TOW2A', env: { range: 0, slatMode: 'pass' }, label: '擋下 TOW-2A 飛彈' }],
+      meter: { val: r => projAreal(r), max: 2600, label: '面密度' },
+      check: (r, b, x) => ({ objs: [{ t: '擋下 M829A1（2000 m）', ok: stopped(r) }, { t: '擋下 TOW-2A 飛彈', ok: stopped(x[0]) }, { t: '面密度 ≤ 2600 kg/m²', ok: projAreal(r) <= 2600 }], score: projAreal(r), fmt: kg, higher: false }),
+      medals: { silver: 2250, gold: 1950 }, medalText: v => `≤ ${v} kg/m²`,
+      hints: ['兩種威脅要兩種機制：對長桿彈，陶瓷的質量效率遠高於鋼；對射流，ERA 與 NERA 最划算。', '傾斜會讓每一層的視線厚度變成 1/cos α 倍，但面密度也等比例增加。傾斜本身不省重量，它的價值是讓 ERA 的飛板切到更長的彈體。', '重型 ERA 能同時折斷長桿與打散射流。後面接陶瓷、間隙、再一層陶瓷，比任何鋼板組合都輕。'] }
   ];
+  const EDIT_NAME = { ammo: '彈種', range: '射距', standoff: '炸高', alpha: '傾角', beta: '側轉', descent: '俯角', layers: '裝甲層', hitY: '命中點', hatch: '艙蓋', crew: '乘員位置', veh: '車體' };
+  const MEDAL = ['', '銅牌', '銀牌', '金牌'];
+  const curCh = () => CH.find(c => c.id === S.challenge);
   /** 任務中可否修改某項設定（非任務時一律可以） */
-  function canEdit(k) { const ch = CH.find(c => c.id === S.challenge); return !ch || ch.edit.includes(k); }
-  // 每個 edit 鍵對應的控制項（任務中不可改者隱藏）
+  function canEdit(k) { const ch = curCh(); return !ch || ch.edit.includes(k); }
   const EDIT_UI = {
-    ammo: () => [$('ammoGroups'), $('ammoSel').closest('.field'), $('ammoAdv')],
+    ammo: () => [$('ammoGroups'), $('ammoSel').closest('.field'), $('ammoAdv'), $('ammoSpec'), $('ammoNote')],
     range: () => [$('rangeField')], standoff: () => [$('standoffField')],
     alpha: () => [$('alpha').closest('.field')], beta: () => [$('beta').closest('.field')], descent: () => [$('descent').closest('.field')],
-    layers: () => [$('presetSel').closest('.field'), $('layers'), $('addRow')],
+    layers: () => [$('layers'), $('addRow')],
     hitY: () => [$('hitY').closest('.field')], hatch: () => [$('hatchMode').closest('.field'), $('relief').closest('label')],
-    crew: () => [$('crewList'), $('addCrew').closest('.row')], veh: () => [$('compSel').closest('.field'), $('boxDims')]
+    crew: () => [$('crewList'), $('addCrew').closest('.row')], veh: () => [$('compSel').closest('.field'), $('boxDims'), $('vehDesc')]
   };
   const DOCK_KEYS = { ammo: ['ammo', 'range', 'standoff'], armor: ['alpha', 'beta', 'descent', 'layers'], crew: ['hitY', 'hatch', 'crew', 'veh'] };
+  /* 任務執行狀態：plan＝調整中（結果未知）、shot＝已試射 */
+  const MS = { state: 'plan', debriefed: true, extra: [], last: null };
   function applyLock() {
-    const inCh = !!CH.find(c => c.id === S.challenge);
+    const ch = curCh(); const inCh = !!ch;
     Object.entries(EDIT_UI).forEach(([k, f]) => f().forEach(el => el && el.classList.toggle('locked', !canEdit(k))));
-    const tabs = document.querySelectorAll('.dock-tabs [data-dock]');
-    tabs.forEach(b => { const ks = DOCK_KEYS[b.dataset.dock]; b.hidden = inCh && (!ks || !ks.some(canEdit)); });
-    const cur = document.querySelector(`.dock-tabs [data-dock="${S.dock}"]`);
-    if (cur && cur.hidden) { const first = [...tabs].find(b => !b.hidden); if (first) setDock(first.dataset.dock); }
+    document.querySelectorAll('.dock:not(.right) .dock-panel').forEach(p => { const ks = DOCK_KEYS[p.dataset.panel]; p.classList.toggle('locked', inCh && (!ks || !ks.some(canEdit))); });
     document.body.classList.toggle('in-challenge', inCh);
+    document.body.classList.toggle('msn-plan', inCh && !(MS.state === 'shot' && MS.debriefed));
+    $('msnStrip').hidden = !inCh; $('msnBrief').hidden = !inCh; $('msnPanel').hidden = !inCh; $('chBar').hidden = true;
+  }
+  const shotsLeft = ch => Math.max(0, ch.shots - (S.chShots || 0));
+  /** 依成績（或用彈數）與提示使用數評定獎牌：0 無、1 銅、2 銀、3 金 */
+  function medalOf(ch, score, shots) {
+    let m = 1; const md = ch.medals || {};
+    if (ch.medalBy === 'shots') { if (shots <= md.silver) m = 2; if (shots <= md.gold) m = 3; }
+    else { const ok = v => ch.higherBetter ? score >= v : score <= v; if (md.silver != null && ok(md.silver)) m = 2; if (md.gold != null && ok(md.gold)) m = 3; }
+    if (m === 3 && (S.chHints || 1) > 1) m = 2; // 金牌最多只能看 1 則提示
+    return m;
+  }
+  function evalMission(ch) {
+    MS.extra = (ch.also || []).map(t => { try { return E.simulate(Object.assign({}, baseAmmo(t.ammoId)), S.stack, Object.assign(env(), t.env)); } catch (_) { return null; } });
+    const r = ch.check(RES, BEH || { crew: [] }, MS.extra); r.pass = r.objs.every(o => o.ok); return r;
   }
   function startChallenge(id) {
     const ch = CH.find(c => c.id === id); if (!ch) return; const s = ch.setup();
-    S.challenge = id; S.chShots = 0; S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = s.slatMode || 'random'; S.hitU = 0.55;
+    S.challenge = id; S.chShots = 0; S.chHints = 1; S.chLast = null; MS.state = 'plan'; MS.debriefed = true; MS.last = null;
+    S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = s.slatMode || 'random'; S.hitU = 0.55;
     if (s.preset) { const p = D.PRESETS.find(x => x.id === s.preset); S.presetId = p.id; S.stack = clone(p.layers); S.alpha = p.alpha; S.vehId = p.veh; } else { S.presetId = ''; S.stack = clone(s.stack); S.alpha = s.alpha || 0; }
     if (s.veh) S.vehId = s.veh;
-    S.crewVeh = null; S.comp.hatchMode = 0;
+    S.crewVeh = null; S.comp.hatchMode = 0; S.comp.relief = false;
     if (s.range != null) S.range = s.range;
-    save(); showView('lab'); setDock(DOCK_KEYS.ammo.some(canEdit) ? 'ammo' : DOCK_KEYS.armor.some(canEdit) ? 'armor' : 'crew'); compute(); renderAll(); applyLock(); if (r3d && S.view === '3d') r3d.setScene(SC);
+    $('msnDebrief').hidden = true;
+    save(); showView('lab'); if (ch.view3d && S.view !== '3d') setView('3d'); compute(); renderAll(); checkChallenge(); if (r3d && S.view === '3d') r3d.setScene(SC);
   }
-  let lastPass = null;
-  const EDIT_NAME = { ammo: '彈種', range: '射距', standoff: '炸高', alpha: '傾角', beta: '側轉', descent: '俯角', layers: '裝甲層', hitY: '命中點', hatch: '艙蓋', crew: '乘員', veh: '車體' };
-  /** fired：這次呼叫來自開火（只有開火才判定成績；同成績時發數較少者更好） */
-  function checkChallenge(fired) {
-    const bar = $('chBar'); const ch = CH.find(c => c.id === S.challenge);
-    applyLock();
-    if (!ch) { bar.hidden = true; return; }
-    bar.hidden = false; $('chBarTitle').textContent = '任務：' + ch.title;
-    const r = ch.check(RES, BEH || { crew: [] });
-    if (fired) S.chLast = { pass: r.pass, score: r.score };
-    const L = S.chShots ? S.chLast : null;
-    const best = S.best[ch.id]; const bs = (S.bestShots || {})[ch.id]; const shots = S.chShots || 0;
-    $('chBarGoal').textContent = ch.goal + `　可調：${ch.edit.map(k => EDIT_NAME[k]).join('、')}　已射 ${shots} 發`
-      + (L ? (L.pass ? `　✔ 上一發達成（${r.fmt(L.score)}）` : '　✘ 上一發未達成') : '')
-      + (best != null ? `　最佳：${r.fmt(best)}${bs ? `（${bs} 發）` : ''}` : '');
-    if (fired && r.pass) {
-      const better = best == null || (r.higher ? r.score > best : r.score < best) || (r.score === best && (!bs || shots < bs));
-      if (better) { S.best[ch.id] = r.score; S.bestShots = S.bestShots || {}; S.bestShots[ch.id] = shots; save(); if (lastPass !== ch.id + r.score + '/' + shots) toast(`任務達成：${ch.title}（${r.fmt(r.score)}，${shots} 發）`); }
-      lastPass = ch.id + r.score + '/' + shots;
+  function exitChallenge(toList) { S.challenge = null; MS.state = 'plan'; $('msnDebrief').hidden = true; save(); checkChallenge(); renderAll(); compute(); if (toList) showView('challenge'); }
+  /** 參數變動後：回到「結果未知」狀態 */
+  function msnDirty() { if (!curCh()) return; MS.state = 'plan'; P.playing = false; P.d = 0; setPlayUI(); checkChallenge(); }
+  /** 開火 */
+  function msnFire() {
+    const ch = curCh(); if (!ch) return;
+    S.chShots = (S.chShots || 0) + 1; MS.state = 'shot'; MS.debriefed = false;
+    const r = evalMission(ch); MS.last = r; S.chLast = { pass: r.pass, score: r.score };
+    if (r.pass) {
+      const m = medalOf(Object.assign({ higherBetter: r.higher }, ch), r.score, S.chShots); const best = S.best[ch.id];
+      S.medals = S.medals || {}; S.bestShots = S.bestShots || {};
+      const better = best == null || (r.higher ? r.score > best : r.score < best) || (r.score === best && S.chShots < (S.bestShots[ch.id] || 99));
+      if (better) { S.best[ch.id] = r.score; S.bestShots[ch.id] = S.chShots; }
+      if (m > (S.medals[ch.id] || 0)) S.medals[ch.id] = m;
+      MS.last.medal = m;
     }
+    save(); checkChallenge();
   }
-  $('chBarExit').addEventListener('click', () => { S.challenge = null; save(); checkChallenge(); renderAll(); });
+  /** 播放進行到車內後效結束時顯示任務講評 */
+  function msnTick(st) {
+    const ch = curCh(); if (!ch || MS.state !== 'shot' || MS.debriefed) return;
+    if (st.phase === 'cool' || st.phase === 'end') { MS.debriefed = true; checkChallenge(); showDebrief(); }
+  }
+  function objList(objs, known) { return objs.map(o => `<li class="${known ? (o.ok ? 'ok' : 'no') : ''}"><span class="mk">${known ? (o.ok ? '✔' : '✘') : '□'}</span>${esc(o.t)}</li>`).join(''); }
+  function showDebrief() {
+    const ch = curCh(), r = MS.last; if (!ch || !r) return; const left = shotsLeft(ch);
+    const fail = !r.pass && left === 0;
+    $('dbStamp').textContent = r.pass ? '任務達成' : (fail ? '任務失敗' : '未達成'); $('dbStamp').className = 'stamp ' + (r.pass ? 'ok' : 'no');
+    $('dbTitle').textContent = `${ch.code}　${ch.title}`;
+    $('dbObjs').innerHTML = objList(r.objs, true);
+    const md = ch.medals || {};
+    let line = r.pass ? `成績：${r.fmt(r.score)}　用彈 ${S.chShots} 發　評定：${MEDAL[r.medal]}` : (fail ? '試射彈藥已用盡。重新開始會還原所有設定。' : `還剩 ${left} 發試射彈。調整設計後再試。`);
+    const capped = r.pass && r.medal === 2 && (S.chHints || 1) > 1 && (ch.medalBy === 'shots' ? S.chShots <= md.gold : (r.higher ? r.score >= md.gold : r.score <= md.gold));
+    if (capped) line += '　成績已達金牌標準，但看過 2 則以上提示時最高只能拿銀牌。';
+    else if (r.pass && r.medal < 3) line += ch.medalBy === 'shots' ? `　（金牌：${md.gold} 發內達成）` : `　（金牌：${ch.medalText(md.gold)}）`;
+    $('dbLine').textContent = line;
+    const i = CH.indexOf(ch); const next = CH[i + 1];
+    $('dbNext').hidden = !(r.pass && next); if (next) $('dbNext').dataset.ch = next.id;
+    $('dbRetry').textContent = left > 0 ? (r.pass ? '繼續改進' : '調整後再試') : '重新開始'; $('dbRetry').dataset.restart = left > 0 ? '' : '1';
+    $('msnDebrief').hidden = false;
+  }
+  $('dbRetry').addEventListener('click', e => { $('msnDebrief').hidden = true; if (e.target.dataset.restart) startChallenge(S.challenge); });
+  $('dbNext').addEventListener('click', e => startChallenge(e.target.dataset.ch));
+  $('dbList').addEventListener('click', () => exitChallenge(true));
+  $('msnExit').addEventListener('click', () => exitChallenge(true));
+  $('msnRestart').addEventListener('click', () => startChallenge(S.challenge));
+  $('msnHintBtn').addEventListener('click', () => { const ch = curCh(); if (!ch) return; S.chHints = Math.min(ch.hints.length, (S.chHints || 1) + 1); save(); checkChallenge(); });
+  /** 更新任務介面（作戰命令、目標、限重、提示、剩餘發數） */
+  function checkChallenge() {
+    const ch = curCh(); applyLock(); if (!ch) return;
+    const left = shotsLeft(ch); const known = MS.state === 'shot' && MS.debriefed && MS.last;
+    // 頂部任務列
+    $('msnCode').textContent = ch.code; $('msnTitle').textContent = ch.title;
+    $('msnShots').innerHTML = Array.from({ length: ch.shots }, (_, i) => `<i class="${i < left ? 'on' : ''}"></i>`).join('') + `<span>試射彈 ${left} / ${ch.shots}</span>`;
+    $('fireBtn').disabled = left === 0;
+    // 左：作戰命令
+    const threats = [ammo().name].concat((ch.also || []).map(t => baseAmmo(t.ammoId).name));
+    $('msnBrief').innerHTML = `<div class="op-head"><b>${ch.code}</b><span>${esc(ch.place)}</span></div><h2>${esc(ch.title)}</h2>
+      <h3>情況</h3><p>${esc(ch.brief)}</p><h3>任務</h3><p class="order">${esc(ch.order)}</p>
+      <h3>威脅</h3><p class="mono">${threats.map(esc).join('　＋　')}</p>
+      <h3>你能調整的</h3><div class="chips2">${ch.edit.map(k => `<span>${EDIT_NAME[k]}</span>`).join('')}</div>`;
+    // 右：目標、限重、獎牌、提示
+    const objs = known ? MS.last.objs : evalMission(ch).objs;
+    let h = `<div class="sec-h"><h2>任務目標</h2><span class="tag">${known ? (MS.last.pass ? '已達成' : '未達成') : '試射後判定'}</span></div><ul class="objs">${objList(objs, known)}</ul>`;
+    if (ch.meter) { const v = ch.meter.val(RES), f = Math.min(1.25, v / ch.meter.max); h += `<div class="meter${v > ch.meter.max ? ' over' : ''}"><div class="lbl"><span>${ch.meter.label}</span><output>${Math.round(v)} / ${ch.meter.max} kg/m²</output></div><div class="bar"><i style="width:${Math.min(100, f * 80)}%"></i><b></b></div></div>`; }
+    const md = ch.medals || {}; const got = (S.medals || {})[ch.id] || 0;
+    h += `<div class="medals"><span class="${got >= 1 ? 'got' : ''}">銅　達成任務</span><span class="${got >= 2 ? 'got' : ''}">銀　${ch.medalBy === 'shots' ? md.silver + ' 發內' : ch.medalText(md.silver)}</span><span class="${got >= 3 ? 'got' : ''}">金　${ch.medalBy === 'shots' ? md.gold + ' 發內' : ch.medalText(md.gold)}</span></div>`;
+    if (S.best[ch.id] != null) h += `<p class="note">最佳紀錄：${evalMission(ch).fmt(S.best[ch.id])}（${(S.bestShots || {})[ch.id] || '?'} 發）</p>`;
+    const nh = Math.min(S.chHints || 1, ch.hints.length);
+    h += `<div class="sec-h"><h2>設計提示</h2><span class="tag">${nh} / ${ch.hints.length}</span></div><ol class="hints">${ch.hints.slice(0, nh).map(t => `<li>${esc(t)}</li>`).join('')}</ol>`;
+    $('msnBody').innerHTML = h;
+    $('msnHintBtn').hidden = nh >= ch.hints.length; $('msnHintBtn').textContent = nh === 1 ? '再看一則提示（之後最高只能拿銀牌）' : '再看一則提示';
+    $('msnWait').hidden = !!known || MS.state === 'shot'; $('msnWait').textContent = left ? '結果要試射後才知道。調整好就開火。' : '試射彈藥已用盡。';
+  }
   function renderChallenges() {
-    const done = CH.filter(c => S.best[c.id] != null).length;
-    $('chProgress').textContent = `${done} / ${CH.length} 完成`;
-    $('chGrid').innerHTML = CH.map(c => { const b = S.best[c.id]; const r = c.check({ verdict: '', subs: [], margin: 0 }, { crew: [], kill: null }); return `<div class="ch${b != null ? ' done' : ''}"><h3>${esc(c.title)}</h3><div class="goal">${esc(c.goal)}</div><div class="goal" style="opacity:.75">可調：${c.edit.map(k => EDIT_NAME[k]).join("、")}</div><div class="foot"><span class="best">${b != null ? '✔ 最佳 ' + esc(r.fmt(b)) + ((S.bestShots || {})[c.id] ? '（' + S.bestShots[c.id] + ' 發）' : '') : '未完成'}</span><button class="btn small primary" data-ch="${c.id}">開始</button></div></div>`; }).join('');
+    const med = S.medals || {}; const done = CH.filter(c => S.best[c.id] != null).length; const gold = CH.filter(c => med[c.id] === 3).length;
+    $('chProgress').textContent = `完成 ${done} / ${CH.length}　金牌 ${gold}`;
+    $('chGrid').innerHTML = CH.map((c, i) => {
+      const open = i < 3 || done >= i - 1; const m = med[c.id] || 0; const b = S.best[c.id];
+      return `<div class="ch dossier${b != null ? ' done' : ''}${open ? '' : ' shut'}"><div class="op-head"><b>${c.code}</b><span>${esc(c.place)}</span></div><h3>${esc(c.title)}</h3>
+        <div class="goal">${open ? esc(c.order) : '完成前面的任務後解鎖。'}</div>
+        <div class="chips2">${c.edit.map(k => `<span>${EDIT_NAME[k]}</span>`).join('')}<span class="dim">試射 ${c.shots} 發</span></div>
+        <div class="foot"><span class="best m${m}">${m ? '★'.repeat(m) + '☆'.repeat(3 - m) + ' ' + MEDAL[m] : '☆☆☆ 未完成'}</span><button class="btn small primary" data-ch="${c.id}"${open ? '' : ' disabled'}>${b != null ? '再次挑戰' : '接受任務'}</button></div></div>`;
+    }).join('');
   }
-  $('chGrid').addEventListener('click', e => { const b = e.target.closest('[data-ch]'); if (b) startChallenge(b.dataset.ch); });
+  $('chGrid').addEventListener('click', e => { const b = e.target.closest('[data-ch]'); if (b && !b.disabled) startChallenge(b.dataset.ch); });
 
   /* ---------------- 資料庫分頁 ---------------- */
   let teCache = null;
