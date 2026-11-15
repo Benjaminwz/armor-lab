@@ -976,9 +976,18 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
   }
 
   /* ---------------- 分頁切換 ---------------- */
+  /** 材料教室：把某一課的示範設定載入實驗台 */
+  function applyLesson(s, tip) {
+    const p = D.PRESETS.find(x => x.id === s.preset); if (!p) return;
+    S.challenge = null; S.scenId = null; S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = 'random'; S.hitU = 0.55;
+    S.presetId = p.id; S.stack = clone(p.layers); S.alpha = p.alpha; S.vehId = p.veh; S.crewVeh = null; if (s.range != null) S.range = s.range;
+    save(); showView('lab'); setDock(s.dock || 'armor'); compute(); renderAll(); checkChallenge(); if (r3d && S.view === '3d') r3d.setScene(SC);
+    toast('試試看：' + tip);
+  }
   function showView(v) {
-    ['challenge', 'db', 'models'].forEach(k => { $('view-' + k).hidden = k !== v; });
-    ['lab', 'challenge', 'db', 'models'].forEach(k => $('tab-' + k).setAttribute('aria-selected', k === v));
+    ['learn', 'challenge', 'db', 'models'].forEach(k => { $('view-' + k).hidden = k !== v; });
+    if (v === 'learn' && window.Learn) window.Learn.mount($('view-learn'), applyLesson);
+    ['lab', 'learn', 'challenge', 'db', 'models'].forEach(k => $('tab-' + k).setAttribute('aria-selected', k === v));
     if (v === 'challenge') renderChallenges();
     if (v === 'db') renderDB();
     if (v === 'models') renderModels();
@@ -986,7 +995,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
     try { if (location.hash !== '#' + v) history.replaceState(null, '', '#' + v); } catch (_) { }
   }
   document.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) showView(b.dataset.view); });
-  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (['lab', 'challenge', 'db', 'models'].includes(h)) showView(h); });
+  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (['lab', 'learn', 'challenge', 'db', 'models'].includes(h)) showView(h); });
 
   /* ---------------- 錄影（MP4 優先）與截圖 ---------------- */
   let downloads = null;
@@ -1276,7 +1285,7 @@ HESH：接觸 → 鼻部壓潰鋪展約 1 倍口徑 / 撞擊速度 → 底引信
   compute();
   renderAll();
   const h0 = location.hash.slice(1);
-  showView(['lab', 'challenge', 'db', 'models'].includes(h0) ? h0 : 'lab');
+  showView(['lab', 'learn', 'challenge', 'db', 'models'].includes(h0) ? h0 : 'lab');
   if (S.view === '3d') setTimeout(() => setView('3d'), 30); else setView('2d');
   if (S.opts.menu) openMenu();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => drawNow());

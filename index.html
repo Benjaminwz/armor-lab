@@ -282,6 +282,16 @@ table.t tr.clickable:hover td { background: var(--panel-2); }
 .card > header h2 { margin: 0; font-size: 14px; letter-spacing: .12em; font-weight: 700; color: var(--ink-2); }
 .card > header .tag { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
 .card .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.howto { margin: 0 0 10px; padding-left: 22px; display: grid; gap: 4px; color: var(--ink-2); }
+.howto b { color: var(--ink); }
+.lessons { display: grid; gap: 14px; margin-top: 12px; }
+.lesson { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 16px; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); padding: 12px; }
+.lesson canvas { width: 100%; height: auto; aspect-ratio: 560 / 260; border-radius: 6px; outline: 1px solid rgba(255,255,255,.08); display: block; }
+.lesson .no { font-family: var(--f-mono); font-size: 11px; letter-spacing: .14em; color: var(--accent); }
+.lesson h3 { margin: 2px 0 6px; font-size: 17px; text-wrap: balance; }
+.lesson p { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; text-wrap: pretty; }
+.lesson p.try { color: var(--ink); }
+@media (max-width: 900px) { .lesson { grid-template-columns: 1fr; } }
 .ch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .ch { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--panel-2); }
 .ch h3 { margin: 0; font-size: 15px; }
@@ -359,6 +369,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
   <nav class="tabs" role="tablist" aria-label="主要分頁">
     <button role="tab" id="tab-lab" aria-selected="true" data-view="lab">實驗台</button>
     <button role="tab" id="tab-challenge" aria-selected="false" data-view="challenge">作戰任務</button>
+    <button role="tab" id="tab-learn" aria-selected="false" data-view="learn">教學</button>
     <button role="tab" id="tab-db" aria-selected="false" data-view="db">資料庫</button>
     <button role="tab" id="tab-models" aria-selected="false" data-view="models">模型與來源</button>
   </nav>
@@ -504,6 +515,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
     <div class="body"><p class="note">每個任務只開放少數幾項設定。結果不會預先顯示，必須實際試射，而試射彈數有限。依成績或用彈數評定銅、銀、金牌；想拿金牌，最多只能看 1 則設計提示。</p><div class="ch-grid" id="chGrid"></div></div>
   </section>
 </div>
+<div id="view-learn" class="page" hidden></div>
 <div id="view-db" class="page" hidden></div>
 <div id="view-models" class="page" hidden></div>
 </main>
@@ -522,6 +534,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
       <button class="primary" data-go="lab">繼續實驗 <small>沙盒</small></button>
       <button data-go="scen">情境預設 <small id="menuScenN"></small></button>
       <button data-go="challenge">作戰任務 <small id="menuChN"></small></button>
+      <button data-go="learn">材料教室 <small>動畫教學・7 課</small></button>
       <button data-go="db">資料庫 <small>彈藥・材質・ERA</small></button>
       <button data-go="models">模型與來源 <small>公式與文獻</small></button>
       <button data-go="settings">設定 <small>畫質・特效・音效</small></button>
@@ -605,6 +618,7 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 <script src="engine.js"></script>
 <script src="armor.js"></script>
 <script src="audio.js"></script>
+<script src="learn.js"></script>
 <script src="render2d.js"></script>
 <script src="render3d.js"></script>
 <script src="app.js"></script>
