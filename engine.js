@@ -823,12 +823,63 @@
       }
     }
     for (const Q of qsp) {
+      if (Q.gas) { p += gasAt(Q, t); continue; }
       const tt = t - Q.t0; if (tt <= 0) continue;
       p += Q.P * (1 - Math.exp(-tt / Q.tr)) * Math.exp(-tt / Q.tv);
     }
     return p;
   }
   E.pressureAt = pressureAt;
+  function gasAt(G, t) {
+    const T = G.t; if (t <= T[0]) return 0; const n = T.length; if (t >= T[n - 1]) return G.p[n - 1];
+    let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (T[m] <= t) lo = m; else hi = m; }
+    const u = (t - T[lo]) / (T[hi] - T[lo]); return G.p[lo] + (G.p[hi] - G.p[lo]) * u;
+  }
+  /**
+   * 車內氣體壓力歷程（準靜態，空間均勻）。數值積分：
+   *   能量注入：dU = Q̇·dt，U = p·V/(γ−1)  → dp = (γ−1)·Q̇·dt / V
+   *   質量注入（推進藥燃氣）：dm = ṁ_in·dt
+   *   經開口排氣：壅塞流  ṁ = Cd·A·p·√(γ/(R·T))·(2/(γ+1))^((γ+1)/(2(γ−1)))   當 p/p₀ > 1.893
+   *              亞音速   ṁ = Cd·A·p₀^(1/γ)·√(2γ/(γ−1)·p^(1−1/γ)... )（等熵噴嘴公式）
+   *   排氣使剩餘氣體等熵膨脹：dp = γ·p·dm/m
+   *   壁面對流冷卻：Q̇_loss = h·A_w·(T − T₀)，h ≈ 60 W/m²K
+   *   洩壓閥：表壓 > 20 kPa 開啟、< 5 kPa 關閉
+   * sources：[{ t0, E（J）, dur（s）, m（kg 燃氣）}]
+   */
+  function gasHistory(sources, V, A0, Arelief, Awall) {
+    const g = 1.4, R = 287, Cd = 0.62, T0k = 293, h = 60;
+    if (!sources.length) return null;
+    const tStart = Math.min(...sources.map(s => s.t0)); const tEnd = Math.max(...sources.map(s => s.t0 + s.dur)) + 3;
+    let p = P0, m = 1.204 * V, tt = tStart; let relief = false;
+    const ts = [tStart], ps = [0];
+    const crit = Math.pow(2 / (g + 1), (g + 1) / (2 * (g - 1)));
+    while (tt < tEnd) {
+      const dt = tt - tStart < 0.05 ? 2e-5 : tt - tStart < 0.5 ? 2e-4 : 2e-3;
+      let Q = 0, min = 0;
+      sources.forEach(s => { if (tt >= s.t0 && tt < s.t0 + s.dur) { Q += s.E / s.dur; min += (s.m || 0) / s.dur; } });
+      const rho = m / V, T = p / (rho * R);
+      Q -= h * Awall * Math.max(T - T0k, 0);
+      const gp = p - P0; if (Arelief) { if (gp > 2e4) relief = true; else if (gp < 5e3) relief = false; }
+      const A = A0 + (relief ? Arelief : 0);
+      let mout = 0;
+      if (p > P0) {
+        if (p / P0 > 1 / Math.pow(2 / (g + 1), g / (g - 1))) mout = Cd * A * p * Math.sqrt(g / (R * T)) * crit;
+        else { const pr = P0 / p; mout = Cd * A * Math.sqrt(2 * g / (g - 1) * p * rho * (Math.pow(pr, 2 / g) - Math.pow(pr, (g + 1) / g))); }
+      }
+      const dmOut = Math.min(mout * dt, m * 0.2);
+      p += (g - 1) * Q * dt / V;           // 能量
+      m += min * dt;                        // 燃氣質量（能量已含在 Q 內）
+      p -= g * p * dmOut / m; m -= dmOut;   // 排氣、等熵膨脹
+      if (p < P0 && min === 0 && Q <= 0) p = Math.max(p, P0 - 0.02 * P0);
+      tt += dt; ts.push(tt); ps.push(p - P0);
+      if (tt > tStart + 0.2 && Math.abs(p - P0) < 50 && sources.every(s => tt > s.t0 + s.dur)) break;
+    }
+    // 降採樣
+    const step = Math.max(1, Math.floor(ts.length / 3000)); const t2 = [], p2 = [];
+    for (let i = 0; i < ts.length; i += step) { t2.push(ts[i]); p2.push(ps[i]); }
+    return { gas: 1, t: t2, p: p2, peak: Math.max(...p2) };
+  }
+  E.gasHistory = gasHistory;
 
   /** 人體近似：軀幹盒、頭球、腿盒（公尺）。face：f 朝車首(−x)、b 朝車尾、l/r 朝 −z/+z */
   function crewParts(c) {
@@ -874,16 +925,28 @@
     const b = ox * d[0] + oy * d[1] + oz * d[2]; const c = ox * ox + oy * oy + oz * oz - s.r * s.r;
     const h = b * b - c; if (h < 0) return null; const t = -b - Math.sqrt(h); return t >= 0 ? t : null;
   }
+  /** 射線與膠囊體（線段 ab、半徑 r）交點 */
+  function rayCapsule(o, d, A, B, r) {
+    const ba = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], oa = [o[0] - A[0], o[1] - A[1], o[2] - A[2]];
+    const baba = ba[0] * ba[0] + ba[1] * ba[1] + ba[2] * ba[2], bard = ba[0] * d[0] + ba[1] * d[1] + ba[2] * d[2], baoa = ba[0] * oa[0] + ba[1] * oa[1] + ba[2] * oa[2];
+    const rdoa = d[0] * oa[0] + d[1] * oa[1] + d[2] * oa[2], oaoa = oa[0] * oa[0] + oa[1] * oa[1] + oa[2] * oa[2];
+    const qa = baba - bard * bard, qb = baba * rdoa - baoa * bard, qc = baba * oaoa - baoa * baoa - r * r * baba;
+    const hh = qb * qb - qa * qc;
+    if (hh >= 0 && qa > 1e-12) { const t = (-qb - Math.sqrt(hh)) / qa; const y = baoa + t * bard; if (y > 0 && y < baba && t >= 0) return t; }
+    const caps = [A, B]; let best = null;
+    for (const C of caps) { const t = raySphere(o, d, { c: C, r }); if (t != null && (best == null || t < best)) best = t; }
+    return best;
+  }
+  /** 乘員命中：與畫面相同的人體骨架（各肢段膠囊體 + 頭球）；pad 為侵徹體/破片半徑 */
   function hitCrew(o, d, crew, maxT, pad) {
     let best = null;
     crew.forEach((c, ci) => {
-      const P = crewParts(c);
-      const grow = b => ({ min: b.min.map(v => v - pad), max: b.max.map(v => v + pad) });
-      const tH = raySphere(o, d, { c: P.head.c, r: P.head.r + pad });
-      const tT = rayBox(o, d, grow(P.torso));
-      const tL = rayBox(o, d, grow(P.legs));
-      [[tH, 'head'], [tT, 'torso'], [tL, 'legs']].forEach(([t, part]) => {
-        if (t != null && t <= maxT && (!best || t < best.t)) best = { t, ci, part };
+      const sk = root.Hull.skeleton(c);
+      const tH = raySphere(o, d, { c: sk.head.c, r: sk.head.r + pad });
+      if (tH != null && tH <= maxT && (!best || tH < best.t)) best = { t: tH, ci, part: 'head' };
+      sk.segs.forEach(sg => {
+        const t = rayCapsule(o, d, sg[0], sg[1], Math.max(sg[2], sg[3]) + pad);
+        if (t != null && t <= maxT && (!best || t < best.t)) best = { t, ci, part: sg[4] === 'torso' || sg[4] === 'neck' ? 'torso' : sg[4] === 'arm' ? 'arms' : 'legs' };
       });
     });
     return best;
@@ -912,7 +975,7 @@
     const liner = !!(lastM.liner);
     const tLast = lastMat ? lastMat.tN : 0.02;
     const vol = hull.vol;
-    const vent = (hull.hatch ? 0.35 : 0) + 0.004;
+    let vent = 0.002; // 先以縫隙計，孔洞與艙蓋於下方加入
     const ctx = { hull, crew, mods };
     let Eres = 0, spallM = 0, mu = 0.002, cone = 40 * DEG, vAxis = 0, nFrag = 0, wBAB = 0;
     const perforated = res.verdict === 'perforated';
@@ -998,7 +1061,16 @@
           }
           P.beyond = Math.max(0, Math.min(s, ex.t + 1.6) - ex.t);
           out.events.push({ t: tExit + ex.t / Math.max(P.v, 50), type: 'bulkhead', text: `${P.type === 'jet' ? '殘餘射流' : '侵徹體'}擊穿隔艙板` });
+        } else if (k !== 'fw' && k !== 'door') {
+          // 車體其他壁面（後壁、車頂、車底、砲塔）：剩餘侵徹能力足夠則再次貫穿、飛出車外
+          const NAME = { roof: '車頂', floor: '車底', wall: '後壁', turret: '砲塔裝甲', turretF: '砲塔正面', lfp: '首下裝甲', glacis: '首上裝甲' };
+          const tEx = tExit + ex.t / Math.max(P.v, 50);
+          if (cap > wt) { cap -= wt; P.beyond = 1.5; P.exitVeh = { edge: ex.edge, k, wt, t: tEx, d: ex.t }; out.events.push({ t: tEx, type: 'exit', text: `${P.type === 'jet' ? '殘餘射流' : '侵徹體'}貫穿${NAME[k] || '車體'}（${Math.round(wt)} mm）飛出車外` }); }
+          else out.events.push({ t: tEx, type: 'info', text: `${P.type === 'jet' ? '殘餘射流' : '侵徹體'}被${NAME[k] || '車體'}（${Math.round(wt)} mm）擋下` });
         }
+      } else if (!stopped && P.sDet == null && (ex.edge === 'z+' || ex.edge === 'z-')) {
+        const wt = (hull.tpl && hull.tpl.sideT || 0.05) * 1000; const tEx = tExit + ex.t / Math.max(P.v, 50);
+        if (cap > wt) { cap -= wt; P.beyond = 1.5; P.exitVeh = { edge: ex.edge, k: 'side', wt, t: tEx, d: ex.t }; out.events.push({ t: tEx, type: 'exit', text: `貫穿側裝甲（${Math.round(wt)} mm）飛出車外` }); }
       }
       if (P.sDet != null) {
         const s = Math.min(P.sDet, stopT - 0.05, ex.t - 0.05);
@@ -1060,13 +1132,28 @@
     }
     // 爆震源
     if (wBAB > 1e-5) out.blasts.push({ x: entry[0] + dir[0] * 0.05, y: entry[1] + dir[1] * 0.05, z: 0, W: wBAB, t0: tExit, kind: 'bab', ab: 1.0 });
-    out.blasts = out.blasts.map(b => makeBlast(b, hull));
+    // ---- 洩壓面積：入口孔、出口孔、艙蓋、洩壓閥/洩壓板 ----
+    {
+      let hd = 0;
+      if (perforated) hd = res.cls === 'KE' ? 2.2 * (ammo.D / 1000) : res.cls === 'CE' ? 0.22 * (ammo.CD / 1000) : res.cls === 'AP' ? 1.1 * (ammo.dc || ammo.d) / 1000 : 0;
+      if (res.verdict === 'scab') hd = 1.2 * ammo.d / 1000;
+      const Ahole = Math.PI / 4 * hd * hd;
+      const Aexit = out.penetrator && out.penetrator.exitVeh ? Math.PI / 4 * Math.pow(out.penetrator.type === 'jet' ? 0.03 : 2 * out.penetrator.D, 2) : 0;
+      const hs = (hull.tpl && hull.tpl.hatches) || [0.25];
+      const mode = hull.hatchMode | 0;
+      const Ahatch = mode === 2 ? hs.reduce((a, b) => a + b, 0) : mode === 1 ? hs[0] : 0;
+      const Arelief = hull.relief ? 0.03 : 0;
+      vent = 0.002 + Ahole + Aexit + Ahatch + Arelief;
+      out.vent = { Ahole, Aexit, Ahatch, Arelief, total: vent, mode, tv: hull.vol / (0.6 * vent * C0) };
+    }
+    // 艙蓋開啟時，該處不再反射爆震波（車頂影像源減弱）
+    const roofK = (hull.hatchMode | 0) === 2 ? 0.55 : (hull.hatchMode | 0) === 1 ? 0.8 : 1;
+    out.blasts = out.blasts.map(b => { const B = makeBlast(b, hull); if (roofK < 1) B.imgs.forEach(im => { if (im.o > 0 && im.y > b.y + 0.05) im.k *= roofK; }); return B; });
     const bb = hull.bounds;
-    out.blasts.forEach(b => {
-      const P = 0.4 * b.W * TNT * b.ab / vol;
-      out.qsp.push({ P, t0: b.t0, tr: ((bb.x1 - bb.x0) + (bb.y1 - bb.y0) + hull.D) / C0, tv: vol / (0.6 * vent * C0) });
-    });
-    out.qspTotal = out.qsp.reduce((a, q) => a + q.P, 0);
+    const gasSrc = out.blasts.map(b => ({ t0: b.t0, E: b.W * TNT * b.ab, dur: ((bb.x1 - bb.x0) + (bb.y1 - bb.y0) + hull.D) / C0, m: b.W }));
+    const Awall = 2 * hull.area + hull.poly.reduce((a, p) => a + p.edge.len, 0) * hull.D;
+    const ventArea = () => vent - (hull.relief ? 0.03 : 0);
+    { const G = gasHistory(gasSrc, vol, ventArea(), hull.relief ? 0.03 : 0, Awall); out.qsp = G ? [G] : []; out.qspTotal = G ? G.peak : 0; }
     out.wBAB = wBAB; out.nFrag = nFrag; out.spallM = spallM; out.cone = cone; out.vAxis = vAxis; out.liner = liner; out.wallT0 = wallT0;
 
     // ---- 模組受損 ----
@@ -1111,6 +1198,17 @@
       }
     });
     out.cookoff = cook; out.fuelFire = fuelFire; out.bustleVent = bustleVent;
+    if (cook) {
+      // 推進藥燃燒的準靜態壓力：P ≈ (γ−1)·m·Q / V，Q ≈ 3.5 MJ/kg；燃燒約 0.4 s；經洩壓面積排出
+      // 推進藥（單基/雙基）燃燒熱約 3.5–4.5 MJ/kg；多根裝藥相繼引燃，燃燒時間約 0.5–1.5 s
+      const mProp = { carousel: 120, hull: 45, dry: 60, crate: 30 }[cook.m.stow] || 40;
+      const burn = cook.m.stow === 'carousel' ? 0.6 : 1.2;
+      gasSrc.push({ t0: cook.tBoom - burn * 0.5, E: mProp * 3.8e6, dur: burn, m: mProp });
+      const G = gasHistory(gasSrc, vol, ventArea(), hull.relief ? 0.03 : 0, Awall); out.qsp = [G];
+      const peak = G.peak;
+      cook.peak = peak;
+      out.events.push({ t: cook.tBoom, type: 'cook', text: peak > 3e5 ? `車內壓力約 ${(peak / 1e6).toFixed(1)} MPa：${(hull.hatchMode | 0) ? '火焰自開啟的艙蓋噴出' : '艙蓋緊閉，砲塔/車頂可能被掀飛'}` : `推進藥燃燒，經 ${vent.toFixed(2)} m² 開口洩壓` });
+    }
 
     // ---- 乘員評估 ----
     const T0 = tExit, Tspan = 0.04, NS = 400;

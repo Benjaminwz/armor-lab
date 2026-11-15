@@ -112,6 +112,30 @@
       const e = Math.sqrt(d2) - Math.sqrt(d1); this.crack[j * cols + c] = e < 1.1 ? 255 : (e < 2.2 ? 120 : 0);
     }
     this.snap = { st: this.st.slice(), mat: this.mat.slice(), sub: this.sub.slice(), fuel: this.fuel.slice() };
+    // 物理彈坑半徑（每層依撞擊時的速度計算）
+    //  KE 長桿：空腔膨脹——侵蝕蘑菇頭（半徑約 1.5 r）以界面壓力 P = ½ρp(v−u)² + Yp 推開靶材，
+    //          直到壓力降到靶阻 Rt：Rc = 1.5·r·√(P/Rt)（u 由 Alekseevskii–Tate 解出）
+    //  HEAT 射流：Szendrei–Held  Rc = rj·(v−u)·√(ρj / (2·Rt))，u = v / (1 + √(ρt/ρj))
+    //  全口徑彈：近似剛體，Rc ≈ 0.52·d
+    subInfo.forEach(S => {
+      const M = root.DATA.MATS[S.s.mat] || root.DATA.MATS.RHA;
+      const Rt = M.steel ? 5.0e9 * Math.pow((M.bhn || 270) / 270, 0.36) : (M.Rt || 2e9);
+      let r = this.r0;
+      if (res.cls === 'KE' && res.timeline && res.timeline.length) {
+        const tl = res.timeline; let e = tl.find(q => q.p >= S.s.p0) || tl[tl.length - 1]; const v = e.v || res.impactV;
+        const rod = E.ROD[a.mat] || E.ROD.W; const u = E.solveU(v, rod.rho, M.rho, rod.Yp, Rt);
+        const P = 0.5 * rod.rho * Math.pow(Math.max(v - u, 0), 2) + rod.Yp;
+        r = 1.5 * (a.D / 2000) * Math.sqrt(P / Rt); r = clamp(r, 0.55 * a.D / 1000, 3 * a.D / 1000);
+        S.vIn = v; S.uIn = u;
+      } else if (res.cls === 'CE' && res.jet) {
+        const J = res.jet; const el = J.els.find(q => !q.residual && q.p1 + J.off >= S.s.p0) || J.els[0];
+        const v = el ? el.v : 6000; const rhoJ = J.J.rhoJ || 8960; const u = v / (1 + Math.sqrt(M.rho / rhoJ));
+        const Ljet = Math.max((J.J.V0 - J.J.Vt) * J.tb, 0.05); const rj = Math.sqrt(J.J.Mjet / (Math.PI * rhoJ * Ljet));
+        r = clamp(rj * (v - u) * Math.sqrt(rhoJ / (2 * Rt)), 0.004, 0.05);
+        S.vIn = v; S.uIn = u;
+      } else if (res.cls === 'AP') r = 0.52 * (a.dc || a.d) / 1000;
+      S.rPhys = r * (S.th.brittle ? (S.th.glass ? 1.5 : 1.3) : 1);
+    });
     // 時間事件：各層進入與貫穿時間
     const tEnd = Math.max(sc.tPen1 || 1e-3, 1e-4);
     const ts = []; const NS = 1500; for (let i = 0; i <= NS; i++) ts.push(tEnd * i / NS);
@@ -138,7 +162,7 @@
     if (c < 0 || j < 0 || c >= this.cols || j >= this.rows) return -1; return j * this.cols + c;
   };
   ArmorField.prototype.rLocal = function (S, u, exitOpen) {
-    const r0 = this.r0 * this.matScale(S);
+    const r0 = S.rPhys != null ? S.rPhys : this.r0 * this.matScale(S);
     const dIn = u - S.s.p0; let r = r0;
     if (dIn < 1.6 * r0) r *= 1 + 0.6 * (1 - dIn / (1.6 * r0));
     if (exitOpen) { const dOut = S.s.p1 - u; if (dOut < 1.3 * r0) r *= 1 + 0.5 * (1 - dOut / (1.3 * r0)); }
@@ -176,7 +200,7 @@
   ArmorField.prototype.carve = function (t, d) {
     if (d <= this.lastDepth + 1e-7) return;
     const h = this.h, cols = this.cols, rows = this.rows;
-    const rMax = this.r0 * 2.6;
+    const rMax = Math.max(this.r0, ...this.subInfo.map(S => S.rPhys || 0)) * 2.6;
     const c0 = Math.max(0, Math.floor((this.lastDepth - rMax - this.x0) / h)), c1 = Math.min(cols - 1, Math.ceil((d + rMax - this.x0) / h));
     const j0 = Math.max(0, Math.floor((-rMax - this.y0) / h)), j1 = Math.min(rows - 1, Math.ceil((rMax - this.y0) / h));
     const res = this.sc.res;

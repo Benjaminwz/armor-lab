@@ -372,7 +372,8 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
         <div class="field"><label for="compH">高（m）</label><input type="number" id="compH" min="0.8" max="4" step="0.1"></div>
         <div class="field"><label for="compD">寬（m）</label><input type="number" id="compD" min="0.8" max="6" step="0.1"></div>
       </div>
-      <label class="cb"><input type="checkbox" id="hatch"> 艙蓋開啟（洩壓）</label>
+      <div class="field"><label for="hatchMode">艙蓋</label><select id="hatchMode"><option value="0">全部關閉</option><option value="1">開一個（車長艙蓋）</option><option value="2">全部開啟</option></select></div>
+      <label class="cb" title="表壓超過 20 kPa 時開啟的洩壓閥／洩壓板（約 0.03 m²）"><input type="checkbox" id="relief"> 洩壓閥／洩壓板</label>
       <div class="crew-list" id="crewList"></div>
       <div class="row">
         <button class="btn small" id="addCrew">＋ 乘員</button>
@@ -511,24 +512,24 @@ kbd { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line-
 </div>
 <div class="tip" id="tip" hidden></div>
 
-<script src="lib/three/three.min.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/CopyShader.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/EffectComposer.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/RenderPass.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/ShaderPass.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/UnrealBloomPass.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/GammaCorrectionShader.js?v=mwh64r1v"></script>
-<script src="lib/three/examples/RGBELoader.js?v=mwh64r1v"></script>
-<script src="lib/mp4-muxer.min.js?v=mwh64r1v"></script>
-<script src="data.js?v=mwh64r1v"></script>
-<script src="projgeom.js?v=mwh64r1v"></script>
-<script src="vehicles.js?v=mwh64r1v"></script>
-<script src="engine.js?v=mwh64r1v"></script>
-<script src="armor.js?v=mwh64r1v"></script>
-<script src="audio.js?v=mwh64r1v"></script>
-<script src="render2d.js?v=mwh64r1v"></script>
-<script src="render3d.js?v=mwh64r1v"></script>
-<script src="app.js?v=mwh64r1v"></script>
+<script src="lib/three/three.min.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/CopyShader.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/LuminosityHighPassShader.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/EffectComposer.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/RenderPass.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/ShaderPass.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/UnrealBloomPass.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/GammaCorrectionShader.js?v=mwh6r22l"></script>
+<script src="lib/three/examples/RGBELoader.js?v=mwh6r22l"></script>
+<script src="lib/mp4-muxer.min.js?v=mwh6r22l"></script>
+<script src="data.js?v=mwh6r22l"></script>
+<script src="projgeom.js?v=mwh6r22l"></script>
+<script src="vehicles.js?v=mwh6r22l"></script>
+<script src="engine.js?v=mwh6r22l"></script>
+<script src="armor.js?v=mwh6r22l"></script>
+<script src="audio.js?v=mwh6r22l"></script>
+<script src="render2d.js?v=mwh6r22l"></script>
+<script src="render3d.js?v=mwh6r22l"></script>
+<script src="app.js?v=mwh6r22l"></script>
 
 </html>

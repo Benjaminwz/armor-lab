@@ -31,7 +31,7 @@
   /* ---------- 模板 ---------- */
   H.TEMPLATES = [
     {
-      id: 'mbt_west', name: '主戰車（西方式）· 車體首上', short: 'MBT 車體', group: '主戰車', D: 2.2, yR: 0.98, Ls: 1.65, maxRise: 0.72, minRise: 0.16, lfp: 58,
+      id: 'mbt_west', name: '主戰車（西方式）· 車體首上', short: 'MBT 車體', group: '主戰車', hatches: [0.29, 0.26, 0.21], sideT: 0.06, D: 2.2, yR: 0.98, Ls: 1.65, maxRise: 0.72, minRise: 0.16, lfp: 58,
       desc: '駕駛位於車首中央；左側車體彈藥架、右側前燃料箱；砲塔內車長、砲手、裝填手；砲塔尾艙彈藥以防爆門隔離並有洩壓板。',
       outline: (A, B, y) => [P(0.62, y, 'turret'), P(0.80, y + 0.84, 'turret'), P(2.45, y + 0.84, 'door'), P(2.45, y, 'roof'), P(3.15, y, 'fw'), P(3.15, 0, 'floor')],
       tFront: 0.62,
@@ -56,7 +56,7 @@
       ext: { track: 1, gun: { y: 1.27, cal: 0.12, len: 5.3 }, len: 7.9 }, afes: 1
     },
     {
-      id: 'mbt_east', name: '主戰車（蘇式）· 車體首上', short: '蘇式 MBT', group: '主戰車', D: 2.1, yR: 0.92, Ls: 1.6, maxRise: 0.72, minRise: 0.16, lfp: 60,
+      id: 'mbt_east', name: '主戰車（蘇式）· 車體首上', short: '蘇式 MBT', group: '主戰車', hatches: [0.24, 0.24, 0.2], sideT: 0.08, D: 2.1, yR: 0.92, Ls: 1.6, maxRise: 0.72, minRise: 0.16, lfp: 60,
       desc: '三人車組、自動裝填機。彈藥置於砲塔下方轉盤（22 發）與車首燃料箱彈架，與乘員同一空間——著名的殉爆弱點。',
       outline: (A, B, y) => [P(0.55, y, 'turret'), P(0.68, y + 0.7, 'turret'), P(2.15, y + 0.7, 'turret'), P(2.3, y, 'roof'), P(2.62, y, 'fw'), P(2.62, 0, 'floor')],
       tFront: 0.55,
@@ -78,7 +78,7 @@
       ext: { track: 1, gun: { y: 1.18, cal: 0.125, len: 6.0 }, len: 6.9 }
     },
     {
-      id: 'turret', name: '主戰車 · 砲塔正面', short: '砲塔', group: '主戰車', D: 2.2, yR: 1.8, Ls: 0.75, maxRise: 0.72, minRise: 0.3, lfp: null,
+      id: 'turret', name: '主戰車 · 砲塔正面', short: '砲塔', group: '主戰車', hatches: [0.29, 0.26, 0.21], sideT: 0.08, D: 2.2, yR: 1.8, Ls: 0.75, maxRise: 0.72, minRise: 0.3, lfp: null,
       desc: '命中砲塔前方：砲塔籃與車體戰鬥室相通。砲手緊鄰砲塔前裝甲，是最常受波及的乘員。',
       outline: (A, B, y) => {
         const hr = 0.98, front = Math.min(-0.62, A.x - 0.25);
@@ -103,7 +103,7 @@
       ext: { track: 1, gun: { y: 1.3, cal: 0.12, len: 5.3, fromFace: 1 }, len: 7.9 }, afes: 1
     },
     {
-      id: 'ifv', name: '步兵戰車 · 車體首上', short: 'IFV', group: '輕型裝甲', D: 2.4, yR: 0.95, Ls: 1.45, maxRise: 0.62, minRise: 0.16, lfp: 50,
+      id: 'ifv', name: '步兵戰車 · 車體首上', short: 'IFV', group: '輕型裝甲', hatches: [0.2, 0.2, 0.2, 0.55, 0.55], sideT: 0.018, D: 2.4, yR: 0.95, Ls: 1.45, maxRise: 0.62, minRise: 0.16, lfp: 50,
       desc: '車首為傳動與右前發動機，駕駛位於左前；雙人砲塔；後艙載員背對背乘坐，中央為燃料箱。',
       outline: (A, B, y) => [P(0.95, y, 'turret'), P(1.05, 1.62, 'turret'), P(2.25, 1.62, 'turret'), P(2.35, y, 'roof'), P(4.25, y, 'door'), P(4.25, 0, 'floor')],
       tFront: 0.08,
@@ -127,7 +127,7 @@
       ext: { track: 1, gun: { y: 1.25, cal: 0.03, len: 2.9 }, len: 6.7 }
     },
     {
-      id: 'apc', name: '裝甲運兵車 · 車體首上', short: 'APC', group: '輕型裝甲', D: 2.55, yR: 1.48, Ls: 0.95, maxRise: 0.7, minRise: 0.22, lfp: 50,
+      id: 'apc', name: '裝甲運兵車 · 車體首上', short: 'APC', group: '輕型裝甲', hatches: [0.25, 0.2, 1.6], sideT: 0.044, D: 2.55, yR: 1.48, Ls: 0.95, maxRise: 0.7, minRise: 0.22, lfp: 50,
       desc: '鋁合金車體；右前發動機、左前駕駛；後艙兩側長椅面對面乘坐。',
       outline: (A, B, y) => [P(3.35, y, 'door'), P(3.35, 0, 'floor')],
       modules: [
@@ -148,7 +148,7 @@
       ext: { track: 1, len: 4.9 }
     },
     {
-      id: 'ww2', name: '二戰中型戰車 · 車體首上', short: '二戰中戰車', group: '二戰', D: 2.2, yR: 1.02, Ls: 1.25, maxRise: 0.75, minRise: 0.22, lfp: 45,
+      id: 'ww2', name: '二戰中型戰車 · 車體首上', short: '二戰中戰車', group: '二戰', hatches: [0.25, 0.2, 0.2, 0.18], sideT: 0.038, D: 2.2, yR: 1.02, Ls: 1.25, maxRise: 0.75, minRise: 0.22, lfp: 45,
       desc: '駕駛與副駕駛/機槍手分坐傳動箱兩側；彈藥置於履帶上方的側翼（乾式存放，起火率高）；汽油發動機在後。',
       outline: (A, B, y) => [P(0.55, y, 'turret'), P(0.62, y + 0.78, 'turret'), P(2.05, y + 0.78, 'turret'), P(2.25, y, 'roof'), P(2.85, y, 'fw'), P(2.85, 0, 'floor')],
       tFront: 0.09,
@@ -171,7 +171,7 @@
       ext: { track: 1, gun: { y: 1.38, cal: 0.076, len: 3.2 }, len: 5.9 }
     },
     {
-      id: 'bunker', name: '掩體房間 · 正面牆', short: '掩體', group: '工事', D: 3.2, yR: 2.4, Ls: 2.4, maxRise: 2.4, minRise: 2.4, lfp: null,
+      id: 'bunker', name: '掩體房間 · 正面牆', short: '掩體', group: '工事', hatches: [1.8], sideT: 0.4, D: 3.2, yR: 2.4, Ls: 2.4, maxRise: 2.4, minRise: 2.4, lfp: null,
       desc: '鋼筋混凝土/沙袋掩體的室內。',
       outline: (A, B, y) => [P(4.0, y, 'wall'), P(4.0, 0, 'floor')],
       modules: [
@@ -186,7 +186,7 @@
       ext: { len: 4.4 }
     },
     {
-      id: 'box', name: '試驗艙（可調尺寸）', short: '試驗艙', group: '試驗', D: 2.2, yR: 1.6, Ls: 1.8, maxRise: 1.6, minRise: 0.3, lfp: 0, custom: 1,
+      id: 'box', name: '試驗艙（可調尺寸）', short: '試驗艙', group: '試驗', hatches: [0.3], sideT: 0.02, D: 2.2, yR: 1.6, Ls: 1.8, maxRise: 1.6, minRise: 0.3, lfp: 0, custom: 1,
       desc: '標準化的長方形試驗艙，前壁上段為受測裝甲（與斜角對齊），其餘為薄鋼板。',
       outline: (A, B, y, o) => [P(o.W, y, 'wall'), P(o.W, 0, 'floor')],
       modules: [],
@@ -332,6 +332,33 @@
   }
   H.fitCrew = fitCrew;
   H.crewOK = crewOK;
+
+
+  /* ---------- 人體骨架（2D、3D、命中判定共用；成年男性約 175 cm） ----------
+     局部座標：面向 −x、y 向上、z 為左右。坐姿以髖關節為原點；站姿以腳底為原點。 */
+  const SK = {
+    seat: { pelvis: [0, 0, 0.095], knee: [-0.42, 0.03, 0.11], ankle: [-0.46, -0.4, 0.11], toe: [-0.6, -0.43, 0.11], waist: [0.03, 0.17, 0], chest: [0.06, 0.4, 0],
+      neck: [0.05, 0.58, 0], head: [0.02, 0.72, 0], shoulder: [0.06, 0.52, 0.19], elbow: [-0.02, 0.28, 0.23], wrist: [-0.28, 0.31, 0.18] },
+    stand: { pelvis: [0, 0.92, 0.095], knee: [-0.03, 0.5, 0.1], ankle: [0, 0.08, 0.11], toe: [-0.15, 0.03, 0.11], waist: [0.01, 1.09, 0], chest: [0.02, 1.32, 0],
+      neck: [0.02, 1.5, 0], head: [0, 1.63, 0], shoulder: [0.02, 1.44, 0.19], elbow: [0.01, 1.17, 0.23], wrist: [-0.12, 0.95, 0.2] }
+  };
+  H.SK = SK;
+  H.faceAngle = f => f === 'b' ? Math.PI : f === 'l' ? -Math.PI / 2 : f === 'r' ? Math.PI / 2 : 0;
+  /** 回傳世界座標的關節與肢段：segs = [起點, 終點, 起點半徑, 終點半徑, 部位] */
+  H.skeleton = function (c) {
+    const S = SK[c.posture === 'stand' ? 'stand' : 'seat']; const th = H.faceAngle(c.face || 'f'); const cs = Math.cos(th), sn = Math.sin(th);
+    const W = (p, side) => { const lx = p[0], ly = p[1], lz = (side || 0) * p[2]; return [c.x + lx * cs + lz * sn, c.y + ly, (c.z || 0) - lx * sn + lz * cs]; };
+    const J = {}; ['pelvis', 'knee', 'ankle', 'toe', 'shoulder', 'elbow', 'wrist'].forEach(k => { J[k + 'L'] = W(S[k], -1); J[k + 'R'] = W(S[k], 1); });
+    ['waist', 'chest', 'neck', 'head'].forEach(k => { J[k] = W(S[k], 0); });
+    J.hip = W([S.pelvis[0], S.pelvis[1], 0], 0);
+    const segs = [];
+    ['L', 'R'].forEach(sd => {
+      segs.push([J['pelvis' + sd], J['knee' + sd], 0.085, 0.062, 'thigh'], [J['knee' + sd], J['ankle' + sd], 0.056, 0.044, 'shin'], [J['ankle' + sd], J['toe' + sd], 0.05, 0.045, 'boot'],
+        [J['shoulder' + sd], J['elbow' + sd], 0.052, 0.043, 'arm'], [J['elbow' + sd], J['wrist' + sd], 0.042, 0.034, 'arm']);
+    });
+    segs.push([J.hip, J.waist, 0.15, 0.14, 'torso'], [J.waist, J.chest, 0.14, 0.17, 'torso'], [J.chest, J.neck, 0.17, 0.08, 'torso'], [J.neck, J.head, 0.05, 0.05, 'neck']);
+    return { J, segs, th, head: { c: J.head, r: 0.105 } };
+  };
 
   /* ---------- 射線：至艙壁（多邊形 × z 板）距離 ---------- */
   H.rayExit = function (h, o, d) {

@@ -68,6 +68,7 @@
   function ensure3D() { if (!r3d && threeOK) { r3d = new window.Render3D($('c3d')); if (!r3d.ok) { r3d = null; toast('此瀏覽器無法啟用 WebGL，維持 2D'); } else { r3d.onCrewMove = onCrewMove; r3d.onCrewDrop = onCrewDrop; r3d.thermal = !!S.thermal; r3d.setQuality(S.opts.quality); } } return r3d; }
   r2d.onCrewMove = (i, x, y) => onCrewMove(i, x, y, S.crew[i].z || 0);
   r2d.onCrewDrop = i => onCrewDrop(i);
+  window.__app = { get r3d() { return r3d; }, r2d, get SC() { return SC; }, drawNow: () => drawNow() }; // 偵錯用
   r2d.onHitMove = u => { S.hitU = +u.toFixed(3); clearTimeout(cT); cT = setTimeout(compute, 40); };
   r2d.onHitDrop = () => save();
 
@@ -78,7 +79,7 @@
     const base = RES.subs.filter(s => s.kind === 'mat').pop();
     const phi = (base ? base.thS : S.alpha * DEG) + S.descent * DEG;
     const id = vehId();
-    HULL = window.Hull.build(id, { phi, hitU: S.hitU != null ? S.hitU : 0.55, W: S.comp.W, H: S.comp.H, D: S.comp.D }); HULL.hatch = S.comp.hatch;
+    HULL = window.Hull.build(id, { phi, hitU: S.hitU != null ? S.hitU : 0.55, W: S.comp.W, H: S.comp.H, D: S.comp.D }); HULL.hatchMode = S.comp.hatchMode | 0; HULL.relief = !!S.comp.relief;
     if (S.crewVeh !== id) { S.crew = clone(HULL.crew); S.crewVeh = id; }
     else S.crew = S.crew.map(c => window.Hull.fitCrew(HULL, c));
   }
@@ -369,7 +370,7 @@
   /* ---------------- 乘員艙 ---------------- */
   function renderComp() {
     $('compSel').innerHTML = window.Hull.TEMPLATES.map(t => `<option value="${t.id}" ${t.id === vehId() ? 'selected' : ''}>${t.name}</option>`).join('');
-    $('compW').value = S.comp.W; $('compH').value = S.comp.H; $('compD').value = S.comp.D; $('hatch').checked = !!S.comp.hatch;
+    $('compW').value = S.comp.W; $('compH').value = S.comp.H; $('compD').value = S.comp.D; $('hatchMode').value = String(S.comp.hatchMode | 0); $('relief').checked = !!S.comp.relief;
     $('hitY').min = 0.04; $('hitY').max = 0.96; $('hitY').step = 0.01; $('hitY').value = S.hitU != null ? S.hitU : 0.55; $('hitYOut').textContent = `${Math.round((S.hitU != null ? S.hitU : 0.55) * 100)}%`;
     $('volTag').textContent = HULL ? `V = ${f1(HULL.vol)} m³` : '';
     renderCrewList();
@@ -380,7 +381,8 @@
   }
   $('compSel').addEventListener('change', e => { S.vehId = e.target.value; save(); compute(); renderComp(); renderVeh(); if (r3d && S.view === '3d') r3d.setScene(SC); });
   ['compW', 'compH', 'compD'].forEach(id => $(id).addEventListener('change', e => { const k = id.slice(4); S.comp[k] = clamp(+e.target.value || 1, 0.8, 8); S.compId = 'custom'; fitCrew(); save(); renderComp(); compute(); }));
-  $('hatch').addEventListener('change', e => { S.comp.hatch = e.target.checked; save(); computeBehindOnly(); });
+  $('hatchMode').addEventListener('change', e => { S.comp.hatchMode = +e.target.value; save(); computeBehindOnly(); });
+  $('relief').addEventListener('change', e => { S.comp.relief = e.target.checked; save(); computeBehindOnly(); });
   $('hitY').addEventListener('input', e => { S.hitU = +e.target.value; $('hitYOut').textContent = `${Math.round(S.hitU * 100)}%`; save(); clearTimeout(cT); cT = setTimeout(compute, 60); });
   function renderCrewList() {
     $('crewList').innerHTML = S.crew.map((c, i) => `<div class="crew-item"><span class="dot" style="background:${window.CREW_COLORS[i % 8]}"></span>
@@ -424,7 +426,9 @@
     if (res.cls === 'HESH') kpi('金屬塊厚度', res.hesh ? f0(res.hesh.T) : '—', 'mm');
     else kpi('消耗等效 RHA', f0(res.totalEq), 'mm');
     kpi(res.verdict === 'perforated' ? '殘餘穿深' : '距貫穿尚差', res.margin <= -998 ? '—' : f0(Math.abs(res.margin)), 'mm');
-    if (BEH) kpi('破片 / 準靜壓', `${BEH.nFrag}<small>片</small> ${f1(BEH.qspTotal / 1000)}`, 'kPa');
+    if (BEH) kpi('破片 / 車內氣壓峰值', `${BEH.nFrag}<small>片</small> ${f1(BEH.qspTotal / 1000)}`, 'kPa');
+    if (BEH && BEH.vent) kpi('洩壓開口', BEH.vent.total < 0.1 ? f0(BEH.vent.total * 1e4) : f2(BEH.vent.total), `${BEH.vent.total < 0.1 ? 'cm²' : 'm²'} · ${['艙蓋關','開一個艙蓋','全開'][BEH.vent.mode]}${S.comp.relief ? '＋洩壓閥' : ''}`);
+    if (BEH && BEH.cookoff && BEH.cookoff.peak) kpi('殉爆車內壓力', f2(BEH.cookoff.peak / 1e6), 'MPa');
     $('kpis').innerHTML = k.join('');
     // 乘員
     const c = casualties();
@@ -518,7 +522,7 @@
       <div class="chart"><h3>後效參數</h3><dl class="spec" style="margin-top:6px">
         <dt>剝落破片數</dt><dd>${b.nFrag}</dd><dt>剝落總質量</dt><dd>${f0(b.spallM * 1000)} g</dd><dt>破片錐半角</dt><dd>${f0(b.cone / DEG)}°${b.liner ? '（內襯）' : ''}</dd>
         <dt>軸向破片速度</dt><dd>${f0(b.vAxis)} m/s</dd><dt>爆震源 TNT 當量</dt><dd>${b.blasts.map(x => `${x.kind === 'filler' ? '彈內裝藥' : '貫穿後爆震'} ${f1(x.W * 1000)} g`).join('、') || '—'}</dd>
-        <dt>準靜態壓力</dt><dd>${f1(b.qspTotal / 1000)} kPa</dd><dt>艙容 / 洩壓</dt><dd>${f1(S.comp.W * S.comp.H * S.comp.D)} m³ / ${S.comp.hatch ? '艙蓋開' : '密閉'}</dd>
+        <dt>準靜態壓力</dt><dd>${f1(b.qspTotal / 1000)} kPa</dd><dt>艙容 / 洩壓</dt><dd>${f1(HULL ? HULL.vol : 0)} m³ / 洩壓 ${b.vent ? f2(b.vent.total) : '—'} m²</dd>
       </dl><p class="note" style="margin-top:8px">傷害門檻（短歷時爆震）：鼓膜破裂 34.5 kPa、50% 鼓膜破裂 103 kPa、肺損傷 207 kPa、致死 690 kPa（TM 5-1300 / UFC 3-340-02 表列值）；破片以 79 J 為致命判據。</p></div></div>`;
   }
 
@@ -677,7 +681,7 @@
     S.challenge = id; S.ammoId = s.ammoId; S.standoff = null; S.beta = 0; S.descent = 0; S.slatMode = s.slatMode || 'random'; S.hitU = 0.55;
     if (s.preset) { const p = D.PRESETS.find(x => x.id === s.preset); S.presetId = p.id; S.stack = clone(p.layers); S.alpha = p.alpha; S.vehId = p.veh; } else { S.presetId = ''; S.stack = clone(s.stack); S.alpha = s.alpha || 0; }
     if (s.veh) S.vehId = s.veh;
-    S.crewVeh = null; S.comp.hatch = false;
+    S.crewVeh = null; S.comp.hatchMode = 0;
     if (s.range != null) S.range = s.range;
     save(); showView('lab'); compute(); renderAll(); if (r3d && S.view === '3d') r3d.setScene(SC);
   }

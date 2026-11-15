@@ -343,7 +343,7 @@
     ctx.beginPath(); ctx.moveTo(this.lx(-4), 0); ctx.lineTo(this.lx(this.pEnd + 0.02), 0); ctx.stroke(); ctx.setLineDash([]);
     this.drawPlates(t);
     const F = sc.field;
-    if (F && F.ok && F.cv && main && !this.xray) this.drawField(F); else this.drawChannel(t);
+    if (F && F.ok && F.cv && main) { if (this.xray) { this.ctx.save(); this.ctx.globalAlpha = 0.85; this.drawField(F); this.ctx.restore(); } else this.drawField(F); } else this.drawChannel(t);
     if (res.cls === 'KE') this.drawKE(t);
     else if (res.cls === 'CE') this.drawHEAT(t);
     else if (res.cls === 'HESH') this.drawHESH(t);
@@ -1033,18 +1033,18 @@
     const lw = 0.11 * k;
     ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = depth * (xr ? 0.5 : 1);
     ctx.strokeStyle = body; ctx.fillStyle = body;
-    const dir = f === 'b' ? 1 : -1;
-    if (st) {
-      ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(X(cr.x), Y(cr.y)); ctx.lineTo(X(cr.x), Y(cr.y + 0.85)); ctx.stroke();
-      ctx.lineWidth = lw * 2.4; ctx.beginPath(); ctx.moveTo(X(cr.x), Y(cr.y + 0.95)); ctx.lineTo(X(cr.x), Y(cr.y + 1.38)); ctx.stroke();
-      ctx.beginPath(); ctx.arc(X(cr.x), Y(cr.y + 1.6), 0.11 * k, 0, 7); ctx.fill();
-    } else {
-      ctx.lineWidth = lw;
-      if (f === 'l' || f === 'r') { ctx.beginPath(); ctx.moveTo(X(cr.x), Y(cr.y)); ctx.lineTo(X(cr.x + 0.06), Y(cr.y)); ctx.lineTo(X(cr.x + 0.06), Y(Math.max(0, cr.y - 0.42))); ctx.stroke(); }
-      else { ctx.beginPath(); ctx.moveTo(X(cr.x), Y(cr.y)); ctx.lineTo(X(cr.x + dir * 0.45), Y(cr.y)); ctx.lineTo(X(cr.x + dir * 0.45), Y(Math.max(0, cr.y - 0.42))); ctx.stroke(); }
-      ctx.lineWidth = lw * 2.4; ctx.beginPath(); ctx.moveTo(X(cr.x), Y(cr.y + 0.1)); ctx.lineTo(X(cr.x - dir * 0.03), Y(cr.y + 0.52)); ctx.stroke();
-      ctx.beginPath(); ctx.arc(X(cr.x - dir * 0.03), Y(cr.y + 0.75), 0.11 * k, 0, 7); ctx.fill();
-    }
+    // 依共用骨架畫側視人形（與 3D 模型、命中判定一致）；遠側肢體較暗
+    const sk = root.Hull.skeleton(cr); const zc = cr.z || 0;
+    const segs = sk.segs.slice().sort((p, q) => ((p[0][2] + p[1][2]) / 2) - ((q[0][2] + q[1][2]) / 2));
+    segs.forEach(sg => {
+      const far = (sg[0][2] + sg[1][2]) / 2 < zc - 0.03;
+      ctx.strokeStyle = far ? shade(xr ? (sev ? SEV_COLORS[sev] : '#58d68d') : (sev === 3 ? '#5b2a2a' : '#4c5539'), 0.72) : body;
+      ctx.lineWidth = Math.max(1, (sg[2] + sg[3]) * k * (sg[4] === 'torso' ? 0.95 : 1));
+      ctx.beginPath(); ctx.moveTo(X(sg[0][0]), Y(sg[0][1])); ctx.lineTo(X(sg[1][0]), Y(sg[1][1])); ctx.stroke();
+    });
+    const hc = sk.head.c; ctx.fillStyle = xr ? body : '#c49a7a'; ctx.beginPath(); ctx.ellipse(X(hc[0]), Y(hc[1]), 0.095 * k, 0.11 * k, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = xr ? body : '#2b2f26'; ctx.beginPath(); ctx.ellipse(X(hc[0]), Y(hc[1] + 0.012), 0.11 * k, 0.115 * k, 0, Math.PI, 2 * Math.PI); ctx.fill();
+    void lw; void st; void f;
     ctx.globalAlpha = 1;
     if (main) {
       const b = root.Hull.crewFoot(cr);

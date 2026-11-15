@@ -217,7 +217,7 @@
       fm.__lin = true;
       const pl = new T.Mesh(new T.PlaneGeometry(Wf, Hf), fm);
       pl.position.set(F.x0 + Wf / 2, F.y0 + Hf / 2, 0.0009); pl.receiveShadow = true; pl.renderOrder = 2;
-      this.shotIn.add(pl); this.fieldPlane = pl; this.fieldTex = [map, em];
+      this.fieldTex = [map, em]; this.fieldPlane = null; void pl; // 3D 不再貼材料場影像（改由可變形板網格表現）
       this.fdeb = this.makePoints(2400, 0.007, true, this.shotIn);
       const ft = this.radialTex('flame', [[0, 'rgba(255,236,170,1)'], [0.35, 'rgba(255,150,50,.8)'], [1, 'rgba(255,60,10,0)']]);
       for (let i = 0; i < 36; i++) { const s = new T.Sprite(new T.SpriteMaterial({ map: ft, blending: T.AdditiveBlending, depthWrite: false, transparent: true })); s.visible = false; this.shotIn.add(s); this.flameSpr.push(s); }
@@ -260,41 +260,61 @@
   R3D.prototype.buildHull = function () {
     const T = this.T, h = this.sc.hull, poly = h.poly; const hz = h.D / 2;
     const ext = this.mat('hull'), inn = this.mat('inner'), flo = this.mat('floor'); const cut = new T.MeshStandardMaterial({ color: 0x3a4232, roughness: 0.85, metalness: 0.3 });
-    this.hullMats = [ext, inn, flo, cut];
+    // 近側半邊：半透明，讓車內可見但車體仍是完整的一整台
+    const ghost = m => { const g = m.clone(); g.transparent = true; g.opacity = 0.16; g.depthWrite = false; g.__ghost = true; return g; };
+    const extG = ghost(ext), innG = ghost(inn), floG = ghost(flo);
+    this.hullMats = [ext, inn, flo, cut, extG, innG, floG];
     const g = new T.Group(); this.world.add(g); this.hullGroup = g;
     this.barrel = null;
     poly.forEach((p, i) => {
       const q = poly[(i + 1) % poly.length]; const ed = p.edge; if (ed.k === 'plate') return;
       const t = Math.max(ed.t, 0.02); const dx = q.x - p.x, dy = q.y - p.y; const L = Math.hypot(dx, dy);
       const depth = hz + t;
-      const geo = scaleUV(new T.BoxGeometry(L + t * 0.6, t, depth), L / 1.2, depth / 1.2);
-      const inner = ed.k === 'floor' ? flo : inn;
-      const m = new T.Mesh(geo, [cut, cut, ext, inner, cut, ext]);
-      // 局部 +y＝邊的左法向＝車外（順時針多邊形）
       const mx = (p.x + q.x) / 2 + ed.on[0] * t / 2, my = (p.y + q.y) / 2 + ed.on[1] * t / 2;
-      m.position.set(mx, my, -depth / 2); m.rotation.z = Math.atan2(dy, dx);
-      m.castShadow = true; m.receiveShadow = true; g.add(m);
+      [-1, 1].forEach(sd => {
+        const geo = scaleUV(new T.BoxGeometry(L + t * 0.6, t, depth), L / 1.2, depth / 1.2);
+        const inner = ed.k === 'floor' ? (sd < 0 ? flo : floG) : (sd < 0 ? inn : innG);
+        const E = sd < 0 ? ext : extG;
+        const m = new T.Mesh(geo, [E, E, E, inner, sd < 0 ? cut : E, sd < 0 ? E : cut]);
+        m.position.set(mx, my, sd * depth / 2); m.rotation.z = Math.atan2(dy, dx);
+        m.castShadow = sd < 0; m.receiveShadow = true; g.add(m);
+      });
     });
-    // 遠側側板
+    // 兩側側板（遠側實心、近側半透明）
     const shp = new T.Shape(); h.outer.forEach((p, i) => i ? shp.lineTo(p.x, p.y) : shp.moveTo(p.x, p.y));
     const sideG = new T.ExtrudeGeometry(shp, { depth: 0.04, bevelEnabled: false });
     const uv = sideG.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 1.2, uv.getY(i) / 1.2);
-    const side = new T.Mesh(sideG, [inn, ext]); side.position.z = -hz - 0.04 - 0.002; side.receiveShadow = true; side.castShadow = true; g.add(side);
-    // 發動機艙、履帶、砲管
+    const side = new T.Mesh(sideG, [inn, ext]); side.position.z = -hz - 0.042; side.receiveShadow = true; side.castShadow = true; g.add(side);
+    const side2 = new T.Mesh(sideG, [innG, extG]); side2.position.z = hz + 0.002; g.add(side2);
     const fwI = poly.findIndex(p => p.k === 'fw'); const ex = h.ext || {};
     if (fwI >= 0 && ex.len) {
       const top = poly[fwI]; const nose = Math.min(...poly.map(p => p.x)); const xr = Math.max(top.x + 0.6, nose + ex.len * 0.97);
-      const bay = new T.Mesh(scaleUV(new T.BoxGeometry(xr - top.x, top.y + 0.05, hz + 0.05), 2, 1), [ext, ext, ext, ext, cut, ext]);
-      bay.position.set((xr + top.x) / 2, (top.y + 0.05) / 2 - 0.03, -(hz + 0.05) / 2); bay.castShadow = true; bay.receiveShadow = true; g.add(bay); this.bayX = xr;
+      const bay = new T.Mesh(scaleUV(new T.BoxGeometry(xr - top.x, top.y + 0.05, 2 * (hz + 0.05)), 2, 2), ext);
+      bay.position.set((xr + top.x) / 2, (top.y + 0.05) / 2 - 0.03, 0); bay.castShadow = true; bay.receiveShadow = true; g.add(bay); this.bayX = xr;
+      // 發動機艙蓋格柵
+      const gm = new T.MeshStandardMaterial({ color: 0x1c2018, roughness: 0.9, metalness: 0.4 });
+      for (let k = 0; k < 8; k++) { const r = new T.Mesh(new T.BoxGeometry(0.03, 0.012, 2 * hz * 0.7), gm); r.position.set(top.x + 0.4 + k * (xr - top.x - 0.8) / 8, top.y + 0.055, 0); g.add(r); }
     } else this.bayX = h.bounds.x1;
     if (ex.track) {
       const nose = Math.min(...poly.map(p => p.x)); const rear = this.bayX; const yc = -0.36, r = 0.3;
       const tm = new T.MeshStandardMaterial({ color: 0x2a2d2f, roughness: 0.85, metalness: 0.5 });
+      const rub = new T.MeshStandardMaterial({ color: 0x151617, roughness: 0.95, metalness: 0 });
       const n = Math.max(4, Math.round((rear - nose - 0.4) / 0.72));
-      const wg = new T.CylinderGeometry(r * 0.86, r * 0.86, 0.12, 24); wg.rotateX(Math.PI / 2);
-      for (let i = 0; i < n; i++) { const x = nose + 0.45 + (rear - nose - 0.75) * i / (n - 1); const w = new T.Mesh(wg, tm); w.position.set(x, yc, -hz - 0.2); w.castShadow = true; g.add(w); }
-      const tr = new T.Mesh(new T.BoxGeometry(rear - nose + 0.2, 0.05, 0.5), tm); tr.position.set((rear + nose) / 2, yc - r - 0.02, -hz - 0.2); tr.receiveShadow = true; g.add(tr);
-      const tr2 = tr.clone(); tr2.position.y = 0.03; g.add(tr2);
+      [-1, 1].forEach(sd => {
+        const zc = sd * (hz + 0.28);
+        const wg = new T.CylinderGeometry(r * 0.86, r * 0.86, 0.11, 28); wg.rotateX(Math.PI / 2);
+        const tg = new T.CylinderGeometry(r * 0.92, r * 0.92, 0.1, 28); tg.rotateX(Math.PI / 2);
+        for (let i = 0; i < n; i++) {
+          const x = nose + 0.45 + (rear - nose - 0.75) * i / (n - 1);
+          [-0.07, 0.07].forEach(o => { const w = new T.Mesh(wg, tm); w.position.set(x, yc, zc + o); w.castShadow = true; g.add(w); const ty = new T.Mesh(tg, rub); ty.scale.set(1, 1, 0.25); ty.position.set(x, yc, zc + o + Math.sign(o) * 0.05); g.add(ty); });
+        }
+        // 履帶：上下兩段 + 履帶板紋
+        const tr = new T.Mesh(new T.BoxGeometry(rear - nose + 0.2, 0.06, 0.6), tm); tr.position.set((rear + nose) / 2, yc - r - 0.03, zc); tr.receiveShadow = true; tr.castShadow = true; g.add(tr);
+        const tr2 = tr.clone(); tr2.position.y = 0.02; g.add(tr2);
+        for (let x = nose - 0.05; x < rear + 0.1; x += 0.16) { const sh = new T.Mesh(new T.BoxGeometry(0.03, 0.02, 0.6), tm); sh.position.set(x, yc - r - 0.065, zc); g.add(sh); }
+        // 側裙
+        const skirt = new T.Mesh(scaleUV(new T.BoxGeometry(rear - nose, 0.45, 0.03), 4, 1), sd < 0 ? ext : extG); skirt.position.set((rear + nose) / 2, 0.02, sd * (hz + 0.6)); skirt.castShadow = sd < 0; g.add(skirt);
+      });
     }
     if (ex.gun) {
       const tf = poly.find(p => p.k === 'turret') || poly[1];
@@ -302,8 +322,8 @@
       const bm = new T.MeshStandardMaterial({ color: 0x4a5340, roughness: 0.6, metalness: 0.5, map: this.maps.hullD || null });
       const bg = new T.CylinderGeometry(ex.gun.cal * 0.55, ex.gun.cal * 1.1, ex.gun.len, 24); bg.rotateZ(Math.PI / 2);
       const barrel = new T.Mesh(bg, bm); barrel.position.set(x0 - ex.gun.len / 2, ex.gun.y, ex.gun.fromFace ? -0.5 : 0); barrel.castShadow = true; g.add(barrel); this.barrel = barrel;
+      const ev = new T.Mesh(new T.CylinderGeometry(ex.gun.cal * 1.5, ex.gun.cal * 1.5, ex.gun.len * 0.18, 20), bm); ev.rotation.z = Math.PI / 2; ev.position.set(x0 - ex.gun.len * 0.55, ex.gun.y, barrel.position.z); g.add(ev); this.barrel2 = ev;
     }
-    // 線框（X 光）
     const lm = new T.LineBasicMaterial({ color: 0x46c1f0, transparent: true, opacity: 0.9 });
     const pts = []; [hz, -hz].forEach(z => poly.forEach((p, i) => { const q = poly[(i + 1) % poly.length]; pts.push(p.x, p.y, z, q.x, q.y, z); }));
     poly.forEach(p => pts.push(p.x, p.y, hz, p.x, p.y, -hz));
@@ -312,28 +332,157 @@
     const b = h.bounds;
     this.clip = [new T.Plane(new T.Vector3(1, 0, 0), -b.x0), new T.Plane(new T.Vector3(-1, 0, 0), b.x1), new T.Plane(new T.Vector3(0, 1, 0), -b.y0), new T.Plane(new T.Vector3(0, -1, 0), b.y1), new T.Plane(new T.Vector3(0, 0, 1), hz), new T.Plane(new T.Vector3(0, 0, -1), hz)];
   };
-  /* ----- 裝甲層（彈道群組內） ----- */
+  /* ----- 裝甲層：可變形網格（彈孔、入口唇、背面隆起、花瓣狀撕裂、彈坑內壁） -----
+     變形量全部取自材料場 ArmorField 的物理量：每層彈坑半徑（空腔膨脹 / Szendrei–Held）、
+     進入/貫穿時間、彈坑深度歷程；斜角時彈孔為沿彈道的圓柱與板面的交線（橢圓）。 */
+  function samples(c, a, b, n, pw) {
+    const out = new Set([a, b]);
+    for (let i = 0; i <= n; i++) { const u = i / n; const d = Math.pow(u, pw); [c - d * (c - a), c + d * (b - c)].forEach(v => { if (v >= a && v <= b) out.add(v); }); }
+    for (let i = 0; i <= 24; i++) out.add(a + (b - a) * i / 24);
+    return [...out].sort((x, y) => x - y);
+  }
   R3D.prototype.buildArmor = function () {
-    const T = this.T, res = this.sc.res, hz = this.sc.hull.D / 2 + 0.12;
-    this.slabs = [];
-    const lo = this.yLo, hi = this.yHi;
-    res.subs.forEach(s => {
+    const T = this.T, sc = this.sc, res = sc.res, hz = sc.hull.D / 2 + 0.12;
+    this.slabs = []; this.plates = [];
+    const lo = this.yLo, hi = this.yHi; const F = sc.field && sc.field.ok ? sc.field : null;
+    const glowMat = new T.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: T.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+    this.glowMat = glowMat;
+    res.subs.forEach((s, si) => {
       if (s.kind === 'gap') return;
       const th = s.thS != null ? s.thS : s.theta; const tn = Math.tan(th); const len = (hi - lo) / Math.max(Math.cos(th), 0.05);
       const ym = (lo + hi) / 2;
       if (s.kind === 'slat') {
         const g = new T.Group(); const mat = new T.MeshStandardMaterial({ color: 0x7c8794, metalness: 0.7, roughness: 0.45 });
-        for (let y = lo; y <= hi; y += 0.085) { const bar = new T.Mesh(new T.BoxGeometry(0.012, 0.012, hz), mat); bar.position.set(s.p0 + y * tn, y, -hz / 2); bar.castShadow = true; g.add(bar); }
+        for (let y = lo; y <= hi; y += 0.085) { const bar = new T.Mesh(new T.BoxGeometry(0.012, 0.012, 2 * hz), mat); bar.position.set(s.p0 + y * tn, y, 0); bar.castShadow = true; g.add(bar); }
         this.shotIn.add(g); this.slabs.push({ s, obj: g }); return;
       }
       const m = root.DATA.MATS[s.mat] || root.DATA.MATS.RHA;
-      const side = surfMat(this, T, m); side.__op = side.opacity; side.__glass = side.transparent;
+      const side = surfMat(this, T, m); side.side = T.DoubleSide; side.__op = side.opacity; side.__glass = side.transparent;
+      const sideG = side.clone(); sideG.transparent = true; sideG.opacity = Math.min(side.opacity, 0.18); sideG.depthWrite = false; sideG.__ghost = true;
+      const farPlane = new T.Plane(new T.Vector3(0, 0, -1), 0), nearPlane = new T.Plane(new T.Vector3(0, 0, 1), 0);
       const cut = new T.MeshStandardMaterial({ map: this.hatchTex(s.mat), roughness: 0.8, metalness: 0.1 });
-      const geo = scaleUV(new T.BoxGeometry(Math.max(s.tN, 0.0015), len, hz), 1, len / 0.8);
-      const mesh = new T.Mesh(geo, [side, side, side, side, cut, side]);
       const piv = new T.Group(); piv.position.set((s.p0 + s.p1) / 2 + ym * tn, ym, 0); piv.rotation.z = -th;
-      mesh.position.z = -hz / 2; mesh.castShadow = true; mesh.receiveShadow = true;
-      piv.add(mesh); this.shotIn.add(piv); this.slabs.push({ s, obj: piv, base: piv.position.clone(), mesh });
+      this.shotIn.add(piv);
+      const S = F ? F.subInfo.find(q => q.i === si) : null;
+      if (!S || s.era) {
+        // ERA 板等：完整板塊（起爆後飛離）
+        const mesh = new T.Mesh(scaleUV(new T.BoxGeometry(Math.max(s.tN, 0.0015), len, 2 * hz), 1, len / 0.8), [side, side, side, side, side, side]);
+        mesh.castShadow = true; mesh.receiveShadow = true; piv.add(mesh);
+        this.slabs.push({ s, obj: piv, base: piv.position.clone(), mesh }); return;
+      }
+      side.clippingPlanes = [farPlane]; sideG.clippingPlanes = [nearPlane];
+      // 彈道與板面交點（局部座標：x 為板法向、y 沿板面、z 為寬度）
+      const toL = (p, y) => { const dx = p - piv.position.x, dy = y - piv.position.y; return [dx * Math.cos(th) - dy * Math.sin(th), dx * Math.sin(th) + dy * Math.cos(th)]; };
+      const fI = toL(s.p0, 0), bI = toL(s.p1, 0);
+      const tN = Math.max(s.tN, 0.0015);
+      const Rmax = Math.max(S.rPhys || 0.02, 0.004);
+      const ys = samples(fI[1], -len / 2, len / 2, 46, 2.4), zs = samples(0, -hz, hz, 40, 2.4);
+      const P = { s, S, th, tN, len, hz, fI, bI, ys, zs, piv, metal: !!m.metal, brittle: !!S.th.brittle, faces: [] };
+      [[-1, fI[1]], [1, bI[1]]].forEach(([sgn, yc]) => {
+        const nY = ys.length, nZ = zs.length; const pos = new Float32Array(nY * nZ * 3), base = new Float32Array(nY * nZ * 3), uvs = new Float32Array(nY * nZ * 2), col = new Float32Array(nY * nZ * 3);
+        const rho = new Float32Array(nY * nZ), phi = new Float32Array(nY * nZ);
+        for (let a = 0; a < nY; a++) for (let b = 0; b < nZ; b++) {
+          const k = a * nZ + b; const y = ys[a], z = zs[b];
+          base[k * 3] = sgn * tN / 2; base[k * 3 + 1] = y; base[k * 3 + 2] = z; uvs[k * 2] = y / 0.8; uvs[k * 2 + 1] = z / 0.8;
+          const dy = (y - yc) * Math.cos(th), dz = z; rho[k] = Math.hypot(dy, dz); phi[k] = Math.atan2(dz, dy);
+        }
+        pos.set(base);
+        const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('uv', new T.BufferAttribute(uvs, 2));
+        geo.setAttribute('color', new T.BufferAttribute(col, 3));
+        const idxFull = [];
+        for (let a = 0; a < nY - 1; a++) for (let b = 0; b < nZ - 1; b++) {
+          const k = a * nZ + b; const q = [k, k + nZ, k + nZ + 1, k + 1];
+          if (sgn < 0) idxFull.push(q[0], q[1], q[2], q[0], q[2], q[3]); else idxFull.push(q[0], q[2], q[1], q[0], q[3], q[2]);
+        }
+        geo.setIndex(idxFull.slice()); geo.computeVertexNormals();
+        // 遠半（z ≤ 0）實心、近半半透明：以兩個 mesh 共用幾何、用剪裁平面分開
+        const far = new T.Mesh(geo, side); far.castShadow = true; far.receiveShadow = true;
+        const near = new T.Mesh(geo, sideG);
+        const glow = new T.Mesh(geo, glowMat); glow.renderOrder = 4;
+        piv.add(far); piv.add(near); piv.add(glow);
+        P.faces.push({ sgn, yc, geo, pos, base, col, rho, phi, idxFull, nY, nZ, far, near, glow, key: '' });
+      });
+      // 四周側面
+      const frame = new T.Mesh(new T.BoxGeometry(tN, len, 2 * hz), [cut, cut, cut, cut, cut, cut]);
+      frame.scale.set(1, 1, 1); frame.visible = false; piv.add(frame);
+      [['y', -len / 2], ['y', len / 2]].forEach(([, y]) => { const e = new T.Mesh(new T.BoxGeometry(tN, 0.002, 2 * hz), side); e.position.y = y; piv.add(e); });
+      [-hz, hz].forEach(z => { const e = new T.Mesh(new T.BoxGeometry(tN, len, 0.002), z < 0 ? side : sideG); e.position.z = z; piv.add(e); });
+      // 彈坑內壁（沿彈道的錐管，於彈道群組中）
+      const tube = new T.Mesh(new T.CylinderGeometry(1, 1, 1, 28, 1, true), new T.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.55, metalness: 0.7, side: T.DoubleSide, emissive: 0x000000 }));
+      tube.rotation.z = -Math.PI / 2; tube.visible = false; this.shotIn.add(tube); P.tube = tube;
+      // 剖切面（z = 0）以剖面線顯示
+      this.plates.push(P);
+      this.slabs.push({ s, obj: piv, base: piv.position.clone(), plate: P, mats: [side, sideG] });
+    });
+  };
+  /** 依目前時間更新板面變形（彈孔、唇、隆起、花瓣、熱） */
+  R3D.prototype.updateArmor = function (t) {
+    const sc = this.sc, res = sc.res, F = sc.field; if (!F || !F.ok || !this.plates) return;
+    const depth = t > 0 ? root.craterDepthAt(res, Math.min(t, (sc.tPen1 || t) * 1.5)) : 0;
+    const T = this.T;
+    this.plates.forEach(P => {
+      const s = P.s, S = P.S, th = P.th;
+      const din = depth - s.p0; const started = din > 0 && res.verdict !== 'ricochet';
+      const perf = S.tOut != null && t >= S.tOut;
+      const Rf = started ? F.rLocal(S, s.p0 + 1e-5, perf) : 0;
+      const Rb = perf ? F.rLocal(S, s.p1 - 1e-5, true) : 0;
+      const grow = started ? Math.min(1, din / Math.max(Rf * 0.6, 1e-4)) : 0;
+      const tn = P.tN; const remain = Math.max(0, (s.p1 - depth) * Math.cos(th));
+      // 背面隆起：剩餘厚度小於約 2 倍彈坑半徑時開始（金屬延性變形）
+      const R0 = S.rPhys;
+      let bulgeH = 0, bulgeR = R0 + 2 * tn;
+      if (started && !perf && P.metal) bulgeH = Math.max(0, (2 * R0 - remain) / (2 * R0)) * Math.min(0.55 * R0, 0.6 * tn);
+      if (started && !perf && !P.metal && !P.brittle) bulgeH = Math.max(0, (2 * R0 - remain) / (2 * R0)) * 0.3 * R0;
+      // 貫穿後：薄板（t < 4R）花瓣狀撕裂；厚板為塞塊/剝落，出口擴大
+      const petal = perf && P.metal && tn < 4 * R0; const nPet = tn < 1.5 * R0 ? 4 : tn < 3 * R0 ? 5 : 6;
+      const Rp = Rb + Math.min(1.5 * tn, 1.3 * Rb);
+      const key = [Rf.toFixed(4), Rb.toFixed(4), bulgeH.toFixed(4), grow.toFixed(2), Math.round((F.maxT || 0) / 40), Math.round(t * 20)].join('|');
+      P.faces.forEach(Fc => {
+        if (Fc.key === key) return; Fc.key = key;
+        const front = Fc.sgn < 0; const pos = Fc.pos, base = Fc.base, rho = Fc.rho, phi = Fc.phi; const n = rho.length;
+        const R = front ? Rf : Rb;
+        const hide = new Uint8Array(n), crack = new Uint8Array(n); const cth = Math.max(Math.cos(th), 0.05);
+        for (let k = 0; k < n; k++) {
+          let w = 0; const r = rho[k];
+          if (front && started && P.metal && r > Rf && r < 1.9 * Rf) w = -0.35 * Rf * (1 - (r - Rf) / (0.9 * Rf)) * grow;           // 入口唇（向外）
+          if (front && started && r <= Rf) hide[k] = 1;
+          if (!front && perf && r <= Rb) hide[k] = 1;
+          if (!front) {
+            if (bulgeH > 0 && r < bulgeR) { const u = r / bulgeR; w = bulgeH * (1 - u * u) * (1 - u * u); }
+            if (perf) {
+              if (r <= Rb) { /* 彈孔 */ }
+              else if (petal && r < Rp) {
+                const u = (Rp - r) / (Rp - Rb); w = (r - Rb) * 0.15 + u * u * (Rp - Rb) * 0.95;                               // 花瓣外翻
+                const cr = Math.abs(Math.cos(nPet * phi[k] / 2)); if (cr < 0.11 + 0.1 * u) crack[k] = 1;                          // 撕裂縫
+              } else if (!petal && r < Rb * 1.6) w = 0.2 * Rb * (1 - (r - Rb) / (0.6 * Rb));
+            }
+          }
+          pos[k * 3] = base[k * 3] + w; pos[k * 3 + 1] = base[k * 3 + 1]; pos[k * 3 + 2] = base[k * 3 + 2];
+          if (hide[k]) { pos[k * 3 + 1] = Fc.yc + R * Math.cos(phi[k]) / cth; pos[k * 3 + 2] = R * Math.sin(phi[k]); pos[k * 3] = base[k * 3] + (front ? -0.25 * R * grow * (P.metal ? 1 : 0) : (petal ? 0.95 * (Rp - Rb) : 0)); } // 孔內頂點吸附到孔緣（橢圓）
+          // 熱：沿軸對稱取樣材料場溫度
+          let Tk = 20;
+          if (started && r < 4 * R0) { const yy = Math.min(r / Math.max(Math.cos(th), 0.2), F.Y * 0.95); const fp = (front ? s.p0 + 0.0008 : s.p1 - 0.0008) + yy * Math.tan(th); const cell = F.cell(fp, yy); Tk = cell >= 0 ? F.T[cell] : 20; }
+          const gl = root.glowColor ? root.glowColor(Tk) : null;
+          if (gl) { const a = gl[3]; Fc.col[k * 3] = gl[0] / 255 * a; Fc.col[k * 3 + 1] = gl[1] / 255 * a; Fc.col[k * 3 + 2] = gl[2] / 255 * a; }
+          else { Fc.col[k * 3] = 0; Fc.col[k * 3 + 1] = 0; Fc.col[k * 3 + 2] = 0; }
+        }
+        // 重建索引（挖掉彈孔、撕裂縫）
+        const idx = []; const nZ = Fc.nZ;
+        for (let i = 0; i < Fc.idxFull.length; i += 3) { const a = Fc.idxFull[i], b = Fc.idxFull[i + 1], c = Fc.idxFull[i + 2]; if (hide[a] + hide[b] + hide[c] === 3 || crack[a] + crack[b] + crack[c] >= 2) continue; idx.push(a, b, c); }
+        void nZ;
+        Fc.geo.setIndex(idx); Fc.geo.attributes.position.needsUpdate = true; Fc.geo.attributes.color.needsUpdate = true; Fc.geo.computeVertexNormals();
+      });
+      // 彈坑內壁錐管
+      if (started) {
+        const dEnd = perf ? s.p1 : Math.min(depth, s.p1);
+        const L = Math.max(dEnd - s.p0, 0.0005);
+        const r1 = Rf * 0.92, r2 = perf ? Rb * 0.92 : Math.max(Rf * 0.6, 0.002);
+        P.tube.visible = true; P.tube.geometry.dispose();
+        P.tube.geometry = new T.CylinderGeometry(r2, r1, L, 20, 1, true, Math.PI / 2, Math.PI); // 只有遠半（z ≤ 0）
+        P.tube.position.set(s.p0 + L / 2, 0, 0);
+        const hot = Math.max(0, Math.min(1, ((F.maxT || 20) - 550) / 900));
+        P.tube.material.emissive.setRGB(hot * 0.35, hot * 0.1, hot * 0.02);
+      } else P.tube.visible = false;
     });
   };
   /* ----- 車內模組 ----- */
@@ -346,7 +495,6 @@
     mods.forEach((m, i) => {
       const g = new T.Group(); const sx = m.max[0] - m.min[0], sy = m.max[1] - m.min[1], sz = m.max[2] - m.min[2];
       g.position.set((m.min[0] + m.max[0]) / 2, (m.min[1] + m.max[1]) / 2, (m.min[2] + m.max[2]) / 2);
-      if (g.position.z - sz / 2 > 0.02) { g.visible = false; } // 剖面前半（z>0）不顯示，避免遮住車內
       const K = root.Hull.KIND[m.kind] || {};
       let body;
       if (m.kind === 'ammo') {
@@ -468,36 +616,72 @@
     this.shockMat.clippingPlanes = this.clip;
     this.shockGeo = new T.SphereGeometry(1, 40, 24);
   };
+  /** 乘員：依共用骨架（Hull.skeleton）建模——與命中判定的膠囊體完全一致 */
   R3D.prototype.makeCrew = function (cr, i) {
     const T = this.T;
     const g = new T.Group(); const inner = new T.Group(); g.add(inner);
-    const cloth = new T.MeshStandardMaterial({ color: 0x4a5a44, roughness: 0.85, metalness: 0 });
-    const skin = new T.MeshStandardMaterial({ color: 0xb38b6d, roughness: 0.7 });
-    const helm = new T.MeshStandardMaterial({ color: 0x2f3a2c, roughness: 0.55, metalness: 0.2 });
-    const st = cr.posture === 'stand';
-    const limb = (r, len, mat) => new T.Mesh(new T.CylinderGeometry(r, r * 0.9, len, 12), mat);
-    const add = (o, x, y, z, rz, rx) => { o.position.set(x, y, z); if (rz) o.rotation.z = rz; if (rx) o.rotation.x = rx; o.castShadow = true; o.receiveShadow = true; inner.add(o); return o; };
-    const hipY = st ? 0.85 : 0;
-    add(limb(0.15, 0.46, cloth), 0, hipY + 0.33, 0);
-    add(new T.Mesh(new T.SphereGeometry(0.15, 16, 10), cloth), 0, hipY + 0.56, 0);
-    add(new T.Mesh(new T.SphereGeometry(0.1, 16, 12), skin), 0, hipY + 0.74, 0);
-    add(new T.Mesh(new T.SphereGeometry(0.115, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), helm), 0, hipY + 0.77, 0);
-    if (st) { add(limb(0.065, 0.85, cloth), 0, 0.42, -0.09); add(limb(0.065, 0.85, cloth), 0, 0.42, 0.09); }
-    else {
-      add(limb(0.07, 0.45, cloth), -0.22, 0.02, -0.1, Math.PI / 2); add(limb(0.07, 0.45, cloth), -0.22, 0.02, 0.1, Math.PI / 2);
-      add(limb(0.06, 0.45, cloth), -0.45, -0.22, -0.1); add(limb(0.06, 0.45, cloth), -0.45, -0.22, 0.1);
+    const cloth = new T.MeshStandardMaterial({ color: 0x5b6446, roughness: 0.92, metalness: 0 });
+    const cloth2 = new T.MeshStandardMaterial({ color: 0x4c5539, roughness: 0.92, metalness: 0 });
+    const skin = new T.MeshStandardMaterial({ color: 0xc49a7a, roughness: 0.65 });
+    const helm = new T.MeshStandardMaterial({ color: 0x2b2f26, roughness: 0.6, metalness: 0.1 });
+    const boot = new T.MeshStandardMaterial({ color: 0x1b1a18, roughness: 0.7, metalness: 0.05 });
+    const glove = new T.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.8 });
+    const belt = new T.MeshStandardMaterial({ color: 0x2c2a22, roughness: 0.7, metalness: 0.2 });
+    const sk = root.Hull.skeleton({ x: 0, y: 0, z: 0, posture: cr.posture, face: cr.face });
+    const Y = new T.Vector3(0, 1, 0);
+    const lateral = new T.Vector3(Math.sin(sk.th), 0, Math.cos(sk.th));
+    const V = p => new T.Vector3(p[0], p[1], p[2]);
+    /** 兩點之間的錐形膠囊；sx、sz 為橫截面縮放（軀幹為扁橢圓） */
+    const cap = (a, b, r1, r2, mat, sx, sz) => {
+      const A = V(a), B = V(b); const d = B.clone().sub(A); const L = d.length(); if (L < 1e-4) return;
+      const yv = d.clone().normalize(); let zv = lateral.clone().sub(yv.clone().multiplyScalar(lateral.dot(yv))); if (zv.lengthSq() < 1e-6) zv = new T.Vector3(1, 0, 0); zv.normalize();
+      const xv = new T.Vector3().crossVectors(yv, zv);
+      const M = new T.Matrix4().makeBasis(xv, yv, zv);
+      const cyl = new T.Mesh(new T.CylinderGeometry(r2, r1, L, 16), mat); cyl.quaternion.setFromRotationMatrix(M); cyl.position.copy(A).add(B).multiplyScalar(0.5);
+      cyl.scale.set(sx || 1, 1, sz || 1); cyl.castShadow = true; cyl.receiveShadow = true; inner.add(cyl);
+      [[A, r1], [B, r2]].forEach(([P, r]) => { const s = new T.Mesh(new T.SphereGeometry(r, 16, 12), mat); s.position.copy(P); s.quaternion.copy(cyl.quaternion); s.scale.set(sx || 1, 1, sz || 1); s.castShadow = true; inner.add(s); });
+    };
+    const J = sk.J;
+    // 腿、靴
+    ['L', 'R'].forEach(sd => {
+      cap(J['pelvis' + sd], J['knee' + sd], 0.082, 0.06, cloth);
+      cap(J['knee' + sd], J['ankle' + sd], 0.056, 0.043, cloth);
+      cap(J['ankle' + sd], J['toe' + sd], 0.05, 0.042, boot, 1, 1.25);
+      const ank = V(J['ankle' + sd]); const bt = new T.Mesh(new T.CylinderGeometry(0.052, 0.055, 0.14, 14), boot); bt.position.copy(ank).add(V(J['knee' + sd]).sub(ank).normalize().multiplyScalar(0.05)); bt.quaternion.setFromUnitVectors(Y, V(J['knee' + sd]).sub(ank).normalize()); inner.add(bt);
+      cap(J['shoulder' + sd], J['elbow' + sd], 0.05, 0.042, cloth2);
+      cap(J['elbow' + sd], J['wrist' + sd], 0.042, 0.034, cloth2);
+      const hand = new T.Mesh(new T.SphereGeometry(0.045, 14, 10), glove); hand.position.copy(V(J['wrist' + sd])).add(V(J['wrist' + sd]).sub(V(J['elbow' + sd])).normalize().multiplyScalar(0.05)); hand.scale.set(1, 0.8, 0.65); inner.add(hand);
+    });
+    // 骨盆、軀幹（扁橢圓截面）
+    cap(J.hip, J.waist, 0.15, 0.14, cloth, 0.78, 1.25);
+    cap(J.waist, J.chest, 0.14, 0.165, cloth, 0.78, 1.28);
+    cap(J.chest, J.neck, 0.165, 0.085, cloth, 0.8, 1.32);
+    const bl = new T.Mesh(new T.TorusGeometry(0.14, 0.018, 8, 28), belt); bl.position.copy(V(J.waist)); bl.quaternion.setFromUnitVectors(new T.Vector3(0, 0, 1), V(J.chest).sub(V(J.waist)).normalize()); bl.scale.set(0.8, 1.25, 1); inner.add(bl);
+    // 肩部
+    ['L', 'R'].forEach(sd => { const s = new T.Mesh(new T.SphereGeometry(0.06, 14, 10), cloth); s.position.copy(V(J['shoulder' + sd])); inner.add(s); });
+    // 頸、頭、戰車帽
+    cap(J.neck, J.head, 0.048, 0.05, skin);
+    const H0 = V(J.head);
+    const head = new T.Mesh(new T.SphereGeometry(0.098, 24, 18), skin); head.position.copy(H0); head.scale.set(0.92, 1.12, 0.86); head.castShadow = true; inner.add(head);
+    const fwd = new T.Vector3(-Math.cos(sk.th), 0, Math.sin(sk.th));
+    const nose = new T.Mesh(new T.ConeGeometry(0.016, 0.035, 8), skin); nose.position.copy(H0).add(fwd.clone().multiplyScalar(0.092)); nose.quaternion.setFromUnitVectors(Y, fwd); inner.add(nose);
+    const hel = new T.Mesh(new T.SphereGeometry(0.112, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.58), helm); hel.position.copy(H0).add(new T.Vector3(0, 0.012, 0)).sub(fwd.clone().multiplyScalar(0.008)); hel.scale.set(0.98, 1.08, 0.92); hel.castShadow = true; inner.add(hel);
+    [-1, 1].forEach(sg => { const ear = new T.Mesh(new T.CylinderGeometry(0.04, 0.04, 0.03, 16), helm); ear.position.copy(H0).add(lateral.clone().multiplyScalar(sg * 0.09)).add(new T.Vector3(0, -0.02, 0)); ear.quaternion.setFromUnitVectors(Y, lateral); inner.add(ear); });
+    const gog = new T.Mesh(new T.TorusGeometry(0.1, 0.012, 6, 24, Math.PI), new T.MeshStandardMaterial({ color: 0x3b3b33, roughness: 0.4, metalness: 0.3 })); gog.position.copy(H0).add(new T.Vector3(0, 0.07, 0)); gog.quaternion.setFromUnitVectors(new T.Vector3(0, 0, 1), Y); gog.rotateZ(sk.th + Math.PI / 2); inner.add(gog);
+    // 座椅（坐姿）
+    if (cr.posture !== 'stand') {
+      const seatM = new T.MeshStandardMaterial({ color: 0x2b2e2a, roughness: 0.8, metalness: 0.3 });
+      const sp = new T.Mesh(new T.BoxGeometry(0.4, 0.06, 0.42), seatM); sp.position.set(0, -0.1, 0); sp.rotation.y = sk.th; inner.add(sp);
+      const back = new T.Mesh(new T.BoxGeometry(0.06, 0.45, 0.38), seatM); back.position.copy(new T.Vector3(0, 0.2, 0).add(fwd.clone().multiplyScalar(-0.2))); back.rotation.y = sk.th; inner.add(back);
+      const post = new T.Mesh(new T.CylinderGeometry(0.025, 0.025, Math.max(cr.y - 0.12, 0.05), 10), seatM); post.position.set(0, -0.13 - Math.max(cr.y - 0.12, 0.05) / 2, 0); inner.add(post);
     }
-    add(limb(0.05, 0.4, cloth), -0.12, hipY + 0.38, -0.2, 0.5); add(limb(0.05, 0.4, cloth), -0.12, hipY + 0.38, 0.2, 0.5);
-    // 朝向：f＝面向車首（−x）
-    const f = cr.face || 'f'; inner.rotation.y = f === 'b' ? Math.PI : f === 'l' ? -Math.PI / 2 : f === 'r' ? Math.PI / 2 : 0;
     const col = new T.Color(root.CREW_COLORS[i % root.CREW_COLORS.length]);
-    const ring = new T.Mesh(new T.RingGeometry(0.26, 0.31, 40), new T.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9, side: T.DoubleSide }));
+    const ring = new T.Mesh(new T.RingGeometry(0.26, 0.29, 40), new T.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, side: T.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = -cr.y + 0.005; g.add(ring);
     const lab = new T.Sprite(new T.SpriteMaterial({ map: this.labelTex(cr.name, root.CREW_COLORS[i % root.CREW_COLORS.length]), depthWrite: false, depthTest: false, transparent: true }));
-    lab.scale.set(0.6, 0.15, 1); lab.position.set(0, hipY + 1.05, 0); lab.renderOrder = 10; g.add(lab);
+    lab.scale.set(0.6, 0.15, 1); lab.position.set(0, (cr.posture === 'stand' ? 1.9 : 1.0), 0); lab.renderOrder = 10; g.add(lab);
     g.position.set(cr.x, cr.y, cr.z || 0);
-    if ((cr.z || 0) > 0.15) inner.visible = false; // 剖面前半
-    g.userData = { i, ring, lab, sev: -1, mats: [cloth, skin, helm] };
+    g.userData = { i, ring, lab, sev: -1, mats: [cloth, cloth2, skin, helm], tint: [cloth, cloth2] };
     g.traverse(o => { o.userData.crew = i; });
     this.world.add(g);
     return g;
@@ -506,7 +690,7 @@
   /* ---------- 相機 ---------- */
   R3D.prototype.camTargets = function () {
     const T = this.T, h = this.sc.hull, b = h.bounds;
-    const imp = new T.Vector3(-0.15, h.hitY + 0.05, 0);
+    const imp = new T.Vector3(-Math.cos(this.e) * this.pEnd * 0.6, h.hitY + Math.sin(this.e) * this.pEnd * 0.6 + 0.03, 0);
     const span = Math.max(b.x1 - b.x0, 3);
     const mid = new T.Vector3((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, -0.2);
     return { imp, impR: Math.max(1.4, (this.sc.geo ? this.sc.geo.len : 0.6) * 1.6 + this.pEnd * 1.5), mid, midR: span * 1.15 + 1.5 };
@@ -531,7 +715,8 @@
       this.orbit = { th: lerp(-1.32, -0.62, f), ph: lerp(1.4, 1.08, f), r, tgt };
     }
     // 撞擊特寫時砲管會擋住鏡頭：暫時隱藏
-    if (this.barrel) this.barrel.visible = !(this.camMode === 'auto' && (this.state.focus || 0) < 0.4);
+    const hideB = (this.camMode === 'auto' && (this.state.focus || 0) < 0.4) || this.camMode === 'impact' || this.camMode === 'chase';
+    if (this.barrel) this.barrel.visible = !hideB; if (this.barrel2) this.barrel2.visible = !hideB;
     const o = this.orbit;
     if (o.inside) { cam.position.copy(o.tgt); cam.lookAt(new T.Vector3(0, this.sc.hull.hitY, 0)); return; }
     if (o.chase && this.proj) { const wp = new T.Vector3(); this.proj.getWorldPosition(wp); o.tgt.copy(wp).add(new T.Vector3(0.3, 0, 0)); }
@@ -617,9 +802,9 @@
   R3D.prototype.applyXray = function (force) {
     const on = !!this.xray; if (!force && on === this._xr) return; this._xr = on;
     this.scene.background.copy(on ? this.bgX : this.bg);
-    if (this.hullGroup) this.hullGroup.traverse(o => { if (!o.material) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.transparent = on; m.opacity = on ? 0.1 : 1; m.depthWrite = !on; m.needsUpdate = true; }); o.castShadow = !on; });
+    if (this.hullGroup) this.hullGroup.traverse(o => { if (!o.material) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.transparent = on || !!m.__ghost; m.opacity = on ? 0.1 : (m.__ghost ? 0.16 : 1); m.depthWrite = !(on || m.__ghost); m.needsUpdate = true; }); });
     if (this.hullLines) this.hullLines.visible = on;
-    (this.slabs || []).forEach(sl => { if (sl.mesh) (Array.isArray(sl.mesh.material) ? sl.mesh.material : [sl.mesh.material]).forEach(m => { m.transparent = on || !!m.__glass; m.opacity = on ? 0.25 : (m.__op || 1); m.depthWrite = !on; m.needsUpdate = true; }); });
+    (this.slabs || []).forEach(sl => { (sl.mats || []).forEach(m => { m.transparent = on || !!m.__ghost || !!m.__glass; m.opacity = on ? 0.12 : (m.__ghost ? 0.18 : (m.__op || 1)); m.depthWrite = !(on || m.__ghost); m.needsUpdate = true; }); if (sl.mesh) (Array.isArray(sl.mesh.material) ? sl.mesh.material : [sl.mesh.material]).forEach(m => { m.transparent = on || !!m.__glass; m.opacity = on ? 0.25 : (m.__op || 1); m.depthWrite = !on; m.needsUpdate = true; }); });
     (this.mods || []).forEach(M => { M.edges.visible = on; M.xb.visible = on; M.g.children.forEach(c => { if (c !== M.edges && c !== M.xb) c.visible = !on; }); });
     (this.crew || []).forEach(g => { g.userData.mats.forEach(m => { m.transparent = on; m.opacity = on ? 0.55 : 1; m.needsUpdate = true; }); });
     this.grid.visible = !on;
@@ -646,7 +831,8 @@
       else sl.obj.visible = dt < 3e-5;
     });
     this.updateProjectile(t, ph, behind);
-    if (this.fieldPlane) this.updateField(t, ph);
+    this.updateArmor(t);
+    if (sc.field && sc.field.ok && this.fdeb) this.updateField(t, ph);
     this.updateSparks(t, ph);
     if (this.jet) this.updateJet(t);
     this.updateFlash(t, ph);
@@ -721,7 +907,7 @@
     setClip(clipOn);
     // 通道
     const ch = this.channel; const depth = R2.penDepthAt.call(helper, t);
-    if (!this.fieldPlane && depth > 0 && res.verdict !== 'ricochet') {
+    if (!(this.plates && this.plates.length) && depth > 0 && res.verdict !== 'ricochet') {
       let w; if (res.cls === 'KE') w = a.D / 1000 * 2.2; else if (res.cls === 'CE') w = a.CD / 1000 * 0.18; else w = ((a.dc || a.d) / 1000) * 1.08;
       ch.mesh.visible = true; ch.mesh.scale.set(depth, Math.max(w, 0.004), 1); ch.mesh.position.set(depth / 2, 0, 0.0015);
       ch.glow.visible = ph === 'pen'; ch.glow.position.set(depth, 0, 0.01); const gs = Math.max(w * 4, 0.05); ch.glow.scale.set(gs, gs, 1);
@@ -743,9 +929,7 @@
   };
   R3D.prototype.updateField = function (t, ph) {
     const F = this.sc.field, res = this.sc.res; if (!F || !F.ok) return;
-    this.fieldTex[0].needsUpdate = true; this.fieldTex[1].needsUpdate = true;
-    this.fieldPlane.material.emissiveIntensity = this.thermal ? 0.9 : 2.4;
-    this.fieldPlane.visible = !this.xray;
+
     const P = this.fdeb, pos = P.geometry.attributes.position, col = P.geometry.attributes.color; let n = 0;
     if (t > 0 && !this.xray) for (const p of F.debris) {
       const q = F.debrisPos(p, t); if (!q) continue; const gl = root.glowColor(F.debrisT(p, t));
@@ -856,7 +1040,7 @@
         g.userData.ring.material.color.set(col).convertSRGBToLinear();
         const name = sc.crew[i].name + (sev ? ' · ' + root.SEV_LABEL[sev] : '');
         const old = g.userData.lab.material.map; const nt = this.labelTex(name, col); nt.encoding = T.sRGBEncoding; nt.__enc = true; g.userData.lab.material.map = nt; old.dispose(); g.userData.lab.material.needsUpdate = true;
-        g.userData.mats[0].color.set(sev ? root.SEV_COLORS[sev] : '#4a5a44').convertSRGBToLinear();
+        g.userData.tint[0].color.set(sev ? root.SEV_COLORS[sev] : '#5b6446').convertSRGBToLinear(); g.userData.tint[1].color.set(sev ? root.SEV_COLORS[sev] : '#4c5539').convertSRGBToLinear();
       }
     });
     if (!beh || !active) {
